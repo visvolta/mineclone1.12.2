@@ -9,6 +9,8 @@ public:
     [[nodiscard]] glm::mat4 viewMatrix() const;
     [[nodiscard]] const glm::vec3& position() const { return position_; }
     [[nodiscard]] const glm::vec3& front() const { return front_; }
+    [[nodiscard]] float yaw() const { return yaw_; }
+    [[nodiscard]] float pitch() const { return pitch_; }
 
     void setPosition(const glm::vec3& position) { position_ = position; }
     void look(float xOffset, float yOffset);

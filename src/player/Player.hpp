@@ -38,7 +38,7 @@ public:
     [[nodiscard]] const glm::dvec3& feetPosition() const { return position_; }
     [[nodiscard]] const glm::dvec3& velocity() const { return velocity_; }
     [[nodiscard]] Aabb bounds() const;
-    [[nodiscard]] bool intersectsBlock(const glm::ivec3& block) const;
+    [[nodiscard]] bool intersectsBlock(const World& world, const glm::ivec3& block) const;
 
 private:
     void moveWithCollisions(const World& world, double x, double y, double z, bool sneaking);

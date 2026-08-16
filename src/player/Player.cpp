@@ -6,7 +6,7 @@
 #include <glm/geometric.hpp>
 #include <glm/vec2.hpp>
 
-#include "blocks/BlockRegistry.hpp"
+#include "blocks/BlockShape.hpp"
 #include "world/World.hpp"
 
 namespace {
@@ -23,11 +23,6 @@ constexpr float walkSpeed = 0.1F;
 constexpr float airControl = 0.02F;
 constexpr float flySpeed = 0.05F;
 
-bool solid(const World& world, int x, int y, int z) {
-    const BlockState state = world.getBlock(x, y, z);
-    return blockId(state) != 0 && BlockRegistry::get(state).fullCube;
-}
-
 template <typename Function>
 void forEachCollision(const World& world, const Aabb& area, Function&& function) {
     constexpr double epsilon = 1.0e-7;
@@ -38,10 +33,18 @@ void forEachCollision(const World& world, const Aabb& area, Function&& function)
     const int maxY = static_cast<int>(std::floor(area.maximum.y - epsilon));
     const int maxZ = static_cast<int>(std::floor(area.maximum.z - epsilon));
 
-    for (int y = minY; y <= maxY; ++y)
-        for (int z = minZ; z <= maxZ; ++z)
-            for (int x = minX; x <= maxX; ++x)
-                if (solid(world, x, y, z)) function(Aabb{{x, y, z}, {x + 1.0, y + 1.0, z + 1.0}});
+    for (int y = minY; y <= maxY; ++y) {
+        for (int z = minZ; z <= maxZ; ++z) {
+            for (int x = minX; x <= maxX; ++x) {
+                const BlockState state = world.getBlock(x, y, z);
+                const BlockShapeSet shape = BlockShapes::collision(world, state, x, y, z);
+                for (const BlockBox& box : shape) {
+                    function(Aabb{{x + box.minX, y + box.minY, z + box.minZ},
+                                  {x + box.maxX, y + box.maxY, z + box.maxZ}});
+                }
+            }
+        }
+    }
 }
 
 bool collides(const World& world, const Aabb& box) {
@@ -140,8 +143,16 @@ Aabb Player::bounds() const {
             {position_.x + radius, position_.y + playerHeight, position_.z + radius}};
 }
 
-bool Player::intersectsBlock(const glm::ivec3& block) const {
-    return bounds().intersects(Aabb{{block.x, block.y, block.z}, {block.x + 1.0, block.y + 1.0, block.z + 1.0}});
+bool Player::intersectsBlock(const World& world, const glm::ivec3& block) const {
+    const BlockState state = world.getBlock(block.x, block.y, block.z);
+    const BlockShapeSet shape = BlockShapes::collision(world, state, block.x, block.y, block.z);
+    const Aabb player = bounds();
+    for (const BlockBox& box : shape) {
+        if (player.intersects(Aabb{{block.x + box.minX, block.y + box.minY, block.z + box.minZ},
+                                   {block.x + box.maxX, block.y + box.maxY, block.z + box.maxZ}}))
+            return true;
+    }
+    return false;
 }
 
 void Player::toggleGameMode() {
@@ -169,7 +180,6 @@ void Player::moveRelative(float strafe, float forward, float amount, const glm::
 void Player::moveWithCollisions(const World& world, double x, double y, double z, bool sneaking) {
     Aabb start = bounds();
 
-    // Vanilla prevents a sneaking grounded player from walking over an edge in 0.05-block steps.
     if (sneaking && onGround_) {
         constexpr double increment = 0.05;
         while (x != 0.0 && !collides(world, start.moved(x, -stepHeight, 0.0)))

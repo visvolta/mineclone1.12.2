@@ -24,6 +24,7 @@
 #include "rendering/BiomeColors.hpp"
 #include "rendering/BlockRenderResources.hpp"
 #include "rendering/EnvironmentRenderer.hpp"
+#include "rendering/GameHud.hpp"
 #include "rendering/TextureAtlas.hpp"
 #include "rendering/WorldRenderer.hpp"
 #include "world/Raycast.hpp"
@@ -39,6 +40,7 @@ constexpr double tickDuration = 1.0 / 20.0;
 
 Camera camera;
 bool firstMouseEvent = true;
+bool cursorCaptured = true;
 double previousMouseX = initialWidth / 2.0;
 double previousMouseY = initialHeight / 2.0;
 double pendingScroll = 0.0;
@@ -48,18 +50,26 @@ void framebufferSizeCallback(GLFWwindow*, int width, int height) {
 }
 
 void mouseCallback(GLFWwindow*, double xPosition, double yPosition) {
+    if (!cursorCaptured) {
+        previousMouseX = xPosition;
+        previousMouseY = yPosition;
+        firstMouseEvent = true;
+        return;
+    }
     if (firstMouseEvent) {
         previousMouseX = xPosition;
         previousMouseY = yPosition;
         firstMouseEvent = false;
+        return;
     }
-    camera.look(static_cast<float>(xPosition - previousMouseX), static_cast<float>(previousMouseY - yPosition));
+    camera.look(static_cast<float>(xPosition - previousMouseX),
+                static_cast<float>(previousMouseY - yPosition));
     previousMouseX = xPosition;
     previousMouseY = yPosition;
 }
 
 void scrollCallback(GLFWwindow*, double, double yOffset) {
-    pendingScroll += yOffset;
+    if (cursorCaptured) pendingScroll += yOffset;
 }
 
 bool keyDown(GLFWwindow* window, int key) {
@@ -68,8 +78,10 @@ bool keyDown(GLFWwindow* window, int key) {
 
 PlayerInput readPlayerInput(GLFWwindow* window, bool jumpPressed) {
     PlayerInput input;
-    input.forward = (keyDown(window, GLFW_KEY_W) ? 1.0F : 0.0F) - (keyDown(window, GLFW_KEY_S) ? 1.0F : 0.0F);
-    input.strafe = (keyDown(window, GLFW_KEY_D) ? 1.0F : 0.0F) - (keyDown(window, GLFW_KEY_A) ? 1.0F : 0.0F);
+    input.forward = (keyDown(window, GLFW_KEY_W) ? 1.0F : 0.0F) -
+                    (keyDown(window, GLFW_KEY_S) ? 1.0F : 0.0F);
+    input.strafe = (keyDown(window, GLFW_KEY_D) ? 1.0F : 0.0F) -
+                   (keyDown(window, GLFW_KEY_A) ? 1.0F : 0.0F);
     input.jump = keyDown(window, GLFW_KEY_SPACE);
     input.jumpPressed = jumpPressed;
     input.sneak = keyDown(window, GLFW_KEY_LEFT_SHIFT);
@@ -77,14 +89,22 @@ PlayerInput readPlayerInput(GLFWwindow* window, bool jumpPressed) {
     return input;
 }
 
-void updateWindowTitle(GLFWwindow* window, const Player& player, const BlockInteraction& interaction,
-                       const WorldConfig& config, double framesPerSecond,
-                       std::size_t loadedChunks, const ChunkStreamer& streamer,
-                       const LightingEngine& lighting, const WorldRenderer& renderer) {
+void setCursorCaptured(GLFWwindow* window, bool captured) {
+    cursorCaptured = captured;
+    glfwSetInputMode(window, GLFW_CURSOR, captured ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
+    firstMouseEvent = true;
+    pendingScroll = 0.0;
+}
+
+void updateWindowTitle(GLFWwindow* window, const Player& player,
+                       const BlockInteraction& interaction, const WorldConfig& config,
+                       double framesPerSecond, std::size_t loadedChunks,
+                       const ChunkStreamer& streamer, const LightingEngine& lighting,
+                       const WorldRenderer& renderer) {
     const char* mode = player.gameMode() == GameMode::Survival ? "Survival" : "Creative";
     const WorldRenderStats& stats = renderer.stats();
     std::ostringstream title;
-    title << "Blockcraft | " << std::fixed << std::setprecision(0) << framesPerSecond << " FPS"
+    title << "Blockcraft 1.12.2 | " << std::fixed << std::setprecision(0) << framesPerSecond << " FPS"
           << " | chunks " << loadedChunks
           << " | gen " << streamer.pendingGenerationCount()
           << " | light " << lighting.pendingCount()
@@ -99,7 +119,8 @@ void updateWindowTitle(GLFWwindow* window, const Player& player, const BlockInte
 
 double spawnHeight(const World& world, int x, int z) {
     for (int y = chunkHeight - 1; y >= 0; --y) {
-        if (BlockRegistry::get(world.getBlock(x, y, z)).opaque) return static_cast<double>(y + 1);
+        if (BlockRegistry::get(world.getBlock(x, y, z)).opaque)
+            return static_cast<double>(y + 1);
     }
     return 80.0;
 }
@@ -119,7 +140,7 @@ int main() {
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
 #endif
 
-    GLFWwindow* window = glfwCreateWindow(initialWidth, initialHeight, "Blockcraft - Stage 6", nullptr, nullptr);
+    GLFWwindow* window = glfwCreateWindow(initialWidth, initialHeight, "Blockcraft 1.12.2", nullptr, nullptr);
     if (window == nullptr) {
         std::cerr << "Failed to create the window.\n";
         glfwTerminate();
@@ -130,7 +151,7 @@ int main() {
     glfwSetFramebufferSizeCallback(window, framebufferSizeCallback);
     glfwSetCursorPosCallback(window, mouseCallback);
     glfwSetScrollCallback(window, scrollCallback);
-    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+    setCursorCaptured(window, true);
 
     if (gladLoadGL(glfwGetProcAddress) == 0) {
         std::cerr << "Failed to load OpenGL functions.\n";
@@ -153,6 +174,7 @@ int main() {
         std::cout << "World seed: " << config.seed << " (" << config.seedText << ")\n"
                   << "World type: " << worldTypeName(config.worldType) << "\n"
                   << "View distance: " << config.viewDistance << " chunks\n"
+                  << "GUI scale: " << config.guiScale << " (0 = 1.12.2 Auto)\n"
                   << "Day cycle: " << (config.daylightCycle ?
                       std::to_string(config.dayCycleSeconds) + " seconds" : "disabled") << "\n"
                   << "Weather: " << weatherOverrideName(config.weatherOverride) << "\n"
@@ -166,8 +188,6 @@ int main() {
         World world;
         BiomeColors::load(BLOCKCRAFT_ASSET_ROOT);
         ChunkStreamer chunkStreamer(world, config, config.viewDistance);
-        // A small synchronous island prevents the player from spawning into a
-        // void. The larger view is streamed by the worker pool immediately.
         chunkStreamer.prime(0.0, 0.0, 1);
         LightingEngine lightingEngine(world, chunkStreamer.workers());
         for (const auto& [chunkKey, chunk] : world.chunks()) {
@@ -180,6 +200,7 @@ int main() {
         Environment environment(config);
         EnvironmentRenderer environmentRenderer(environment);
         DebugRenderer debugRenderer;
+        GameHud gameHud(window, BLOCKCRAFT_ASSET_ROOT, atlas);
         Player player({0.5, spawnHeight(world, 0, 0), 0.5});
         BlockInteraction interaction;
         camera.setPosition(player.eyePosition());
@@ -188,14 +209,17 @@ int main() {
 
         double previousTime = glfwGetTime();
         double accumulator = 0.0;
-        bool wireframe = false;
+        bool showDebug = false;
         bool f3WasDown = false;
+        bool escapeWasDown = false;
+        bool paused = false;
         bool gWasDown = false;
         bool jumpWasDown = false;
         bool jumpPressPending = false;
         std::array<bool, 9> numberWasDown{};
         double titleIntervalStart = previousTime;
         std::size_t titleFrameCount = 0;
+        double displayedFps = 0.0;
         using FrameClock = std::chrono::steady_clock;
         const auto targetFrameDuration = config.targetFps > 0
             ? std::chrono::duration_cast<FrameClock::duration>(
@@ -205,51 +229,68 @@ int main() {
 
         while (glfwWindowShouldClose(window) == GLFW_FALSE) {
             glfwPollEvents();
-            if (keyDown(window, GLFW_KEY_ESCAPE)) glfwSetWindowShouldClose(window, GLFW_TRUE);
 
-            const double currentTime = glfwGetTime();
-            accumulator += std::min(currentTime - previousTime, 0.25);
-            previousTime = currentTime;
+            const bool escapeDown = keyDown(window, GLFW_KEY_ESCAPE);
+            if (escapeDown && !escapeWasDown) {
+                paused = !paused;
+                setCursorCaptured(window, !paused);
+                accumulator = 0.0;
+                jumpPressPending = false;
+            }
+            escapeWasDown = escapeDown;
 
             const bool f3Down = keyDown(window, GLFW_KEY_F3);
-            if (f3Down && !f3WasDown) wireframe = !wireframe;
+            if (f3Down && !f3WasDown) showDebug = !showDebug;
             f3WasDown = f3Down;
 
-            const bool gDown = keyDown(window, GLFW_KEY_G);
-            if (gDown && !gWasDown) {
-                player.toggleGameMode();
+            const double currentTime = glfwGetTime();
+            if (paused) {
+                accumulator = 0.0;
+                previousTime = currentTime;
+            } else {
+                accumulator += std::min(currentTime - previousTime, 0.25);
+                previousTime = currentTime;
             }
-            gWasDown = gDown;
 
-            for (int index = 0; index < 9; ++index) {
-                const bool down = keyDown(window, GLFW_KEY_1 + index);
-                if (down && !numberWasDown[static_cast<std::size_t>(index)]) {
-                    interaction.selectNumber(index + 1);
+            if (!paused) {
+                const bool gDown = keyDown(window, GLFW_KEY_G);
+                if (gDown && !gWasDown) player.toggleGameMode();
+                gWasDown = gDown;
+
+                for (int index = 0; index < 9; ++index) {
+                    const bool down = keyDown(window, GLFW_KEY_1 + index);
+                    if (down && !numberWasDown[static_cast<std::size_t>(index)])
+                        interaction.selectNumber(index + 1);
+                    numberWasDown[static_cast<std::size_t>(index)] = down;
                 }
-                numberWasDown[static_cast<std::size_t>(index)] = down;
-            }
-            if (pendingScroll != 0.0) {
-                interaction.scroll(pendingScroll > 0.0 ? 1 : -1);
-                pendingScroll = 0.0;
+                if (pendingScroll != 0.0) {
+                    interaction.scroll(pendingScroll > 0.0 ? 1 : -1);
+                    pendingScroll = 0.0;
+                }
+
+                const bool jumpDown = keyDown(window, GLFW_KEY_SPACE);
+                jumpPressPending = jumpPressPending || (jumpDown && !jumpWasDown);
+                jumpWasDown = jumpDown;
+
+                while (accumulator >= tickDuration) {
+                    player.tick(world, readPlayerInput(window, jumpPressPending), camera.front());
+                    interaction.tick(world, lightingEngine, worldRenderer, player, camera.front(),
+                                     glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS,
+                                     glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS);
+                    environment.tick(world);
+                    jumpPressPending = false;
+                    accumulator -= tickDuration;
+                }
+            } else {
+                gWasDown = keyDown(window, GLFW_KEY_G);
+                jumpWasDown = keyDown(window, GLFW_KEY_SPACE);
+                for (int index = 0; index < 9; ++index)
+                    numberWasDown[static_cast<std::size_t>(index)] = keyDown(window, GLFW_KEY_1 + index);
             }
 
-            const bool jumpDown = keyDown(window, GLFW_KEY_SPACE);
-            jumpPressPending = jumpPressPending || (jumpDown && !jumpWasDown);
-            jumpWasDown = jumpDown;
+            camera.setPosition(player.interpolatedEyePosition(
+                paused ? 0.0F : static_cast<float>(accumulator / tickDuration)));
 
-            while (accumulator >= tickDuration) {
-                player.tick(world, readPlayerInput(window, jumpPressPending), camera.front());
-                interaction.tick(world, lightingEngine, worldRenderer, player, camera.front(),
-                                 glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS,
-                                 glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS);
-                environment.tick(world);
-                jumpPressPending = false;
-                accumulator -= tickDuration;
-            }
-            camera.setPosition(player.interpolatedEyePosition(static_cast<float>(accumulator / tickDuration)));
-
-            // Integrate a few completed chunks every frame. This keeps arrival
-            // latency low without allowing uploads to monopolize one frame.
             const ChunkStreamChanges streamChanges = chunkStreamer.update(
                 player.feetPosition().x, player.feetPosition().z,
                 camera.front().x, camera.front().z, config.streamMainThreadBudgetMs);
@@ -267,17 +308,19 @@ int main() {
                 worldRenderer.chunkLightingChanged(change.chunkX, change.chunkZ);
             worldRenderer.processCompletedMeshes(config.meshMainThreadBudgetMs);
 
-            const float partialTick = static_cast<float>(accumulator / tickDuration);
+            const float partialTick = paused ? 0.0F : static_cast<float>(accumulator / tickDuration);
             const EnvironmentFrame environmentFrame = environment.sample(
                 world, camera.position(), camera.front(), partialTick);
-            glPolygonMode(GL_FRONT_AND_BACK, wireframe ? GL_LINE : GL_FILL);
+            glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
             glClearColor(environmentFrame.fogColor.r, environmentFrame.fogColor.g,
                          environmentFrame.fogColor.b, 1.0F);
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
             glfwGetFramebufferSize(window, &framebufferWidth, &framebufferHeight);
+            std::optional<RaycastHit> currentHit;
             if (framebufferHeight > 0) {
-                const float aspect = static_cast<float>(framebufferWidth) / static_cast<float>(framebufferHeight);
+                const float aspect = static_cast<float>(framebufferWidth) /
+                                     static_cast<float>(framebufferHeight);
                 const glm::mat4 projection = glm::perspective(glm::radians(70.0F), aspect, 0.05F, 500.0F);
                 const glm::mat4 view = camera.viewMatrix();
                 environmentRenderer.renderSky(environmentFrame, camera.position(), view, projection);
@@ -287,9 +330,20 @@ int main() {
 
                 glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
                 const float reach = player.gameMode() == GameMode::Creative ? 5.0F : 4.5F;
-                debugRenderer.renderOutline(raycastBlocks(world, camera.position(), camera.front(), reach), view, projection);
-                debugRenderer.renderCrosshair(framebufferWidth, framebufferHeight);
+                currentHit = raycastBlocks(world, camera.position(), camera.front(), reach);
+                if (!paused) {
+                    debugRenderer.renderBreakOverlay(world, currentHit, interaction.breakProgress(), view, projection);
+                    debugRenderer.renderOutline(world, currentHit, view, projection);
+                    if (!showDebug) debugRenderer.renderCrosshair(framebufferWidth, framebufferHeight);
+                }
             }
+
+            gameHud.beginFrame();
+            gameHud.render(world, player, camera, interaction, config, chunkStreamer,
+                           lightingEngine, worldRenderer, currentHit,
+                           framebufferWidth, framebufferHeight, displayedFps,
+                           showDebug, paused);
+            gameHud.endFrame();
 
             glfwSwapBuffers(window);
 
@@ -299,7 +353,6 @@ int main() {
                 if (nextFrameDeadline > now) {
                     std::this_thread::sleep_until(nextFrameDeadline);
                 } else if (now - nextFrameDeadline > targetFrameDuration) {
-                    // Do not accumulate a growing timing debt after a slow frame.
                     nextFrameDeadline = now;
                 }
             }
@@ -307,8 +360,8 @@ int main() {
             ++titleFrameCount;
             const double titleElapsed = currentTime - titleIntervalStart;
             if (titleElapsed >= 0.5) {
-                updateWindowTitle(window, player, interaction, config,
-                                  static_cast<double>(titleFrameCount) / titleElapsed,
+                displayedFps = static_cast<double>(titleFrameCount) / titleElapsed;
+                updateWindowTitle(window, player, interaction, config, displayedFps,
                                   world.chunkCount(), chunkStreamer, lightingEngine, worldRenderer);
                 titleIntervalStart = currentTime;
                 titleFrameCount = 0;

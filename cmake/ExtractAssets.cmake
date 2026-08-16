@@ -7,10 +7,8 @@ if(NOT DEFINED OUTPUT_DIR OR OUTPUT_DIR STREQUAL "")
 endif()
 
 # The client JAR is the authoritative source for Minecraft 1.12.2 resource-pack
-# data: blockstates, models, textures, colormaps, language data, shaders,
-# structures, recipes, advancements, loot tables, fonts, and every other file
-# under assets/. Extract the complete namespace rather than maintaining a
-# whitelist that has to be updated whenever another game system is implemented.
+# data. Extract the complete namespace: no hand-made, generated, or placeholder
+# game assets are accepted by the client.
 file(REMOVE_RECURSE "${OUTPUT_DIR}")
 file(MAKE_DIRECTORY "${OUTPUT_DIR}")
 file(ARCHIVE_EXTRACT
@@ -21,12 +19,9 @@ file(ARCHIVE_EXTRACT
         "pack.png"
 )
 
-# 1.12.2 keeps streamed launcher resources (notably sounds and sounds.json)
-# in the launcher's content-addressed assets/objects store rather than in the
-# client JAR. If a launcher asset directory and its matching index are
-# available, materialize every logical object into the same resource tree.
-# A logical key such as minecraft/sounds/random/click.ogg therefore becomes
-# OUTPUT_DIR/assets/minecraft/sounds/random/click.ogg.
+# Launcher-managed resources such as sounds live in the content-addressed
+# assets/objects store. Materialize every indexed object when the launcher store
+# is available so runtime resources still resolve through the same exact tree.
 set(launcher_object_count 0)
 if(DEFINED LAUNCHER_ASSETS_DIR AND NOT LAUNCHER_ASSETS_DIR STREQUAL "" AND
    DEFINED ASSET_INDEX_FILE AND NOT ASSET_INDEX_FILE STREQUAL "" AND
@@ -61,8 +56,7 @@ if(DEFINED LAUNCHER_ASSETS_DIR AND NOT LAUNCHER_ASSETS_DIR STREQUAL "" AND
             endif()
 
             set(object_destination "${OUTPUT_DIR}/assets/${logical_name}")
-            get_filename_component(object_destination_directory
-                "${object_destination}" DIRECTORY)
+            get_filename_component(object_destination_directory "${object_destination}" DIRECTORY)
             file(MAKE_DIRECTORY "${object_destination_directory}")
             file(COPY_FILE "${object_source}" "${object_destination}" ONLY_IF_DIFFERENT)
             math(EXPR launcher_object_count "${launcher_object_count} + 1")
@@ -70,10 +64,8 @@ if(DEFINED LAUNCHER_ASSETS_DIR AND NOT LAUNCHER_ASSETS_DIR STREQUAL "" AND
     endif()
 endif()
 
-# These checks intentionally span the major 1.12.2 resource families. They do
-# not define what gets extracted; the full assets/ tree above does that. Their
-# purpose is to fail configuration immediately if the wrong/corrupt JAR was
-# supplied or a future extraction regression silently drops a resource family.
+# Fail immediately on a wrong/corrupt JAR. The Stage 1 HUD requirements are
+# included explicitly here so there is never an internal fallback image/font.
 set(required_jar_resources
     "assets/.mcassetsroot"
     "assets/minecraft/advancements/story/root.json"
@@ -87,11 +79,15 @@ set(required_jar_resources
     "assets/minecraft/shaders/program/blur.json"
     "assets/minecraft/structures/mansion/entrance.nbt"
     "assets/minecraft/textures/blocks/stone.png"
+    "assets/minecraft/textures/blocks/destroy_stage_0.png"
+    "assets/minecraft/textures/blocks/destroy_stage_9.png"
     "assets/minecraft/textures/colormap/foliage.png"
     "assets/minecraft/textures/colormap/grass.png"
     "assets/minecraft/textures/entity/steve.png"
     "assets/minecraft/textures/environment/clouds.png"
+    "assets/minecraft/textures/font/ascii.png"
     "assets/minecraft/textures/gui/icons.png"
+    "assets/minecraft/textures/gui/widgets.png"
     "assets/minecraft/textures/items/apple.png"
 )
 
@@ -103,10 +99,7 @@ foreach(resource IN LISTS required_jar_resources)
     endif()
 endforeach()
 
-file(GLOB_RECURSE extracted_resource_files
-    LIST_DIRECTORIES FALSE
-    "${OUTPUT_DIR}/assets/*"
-)
+file(GLOB_RECURSE extracted_resource_files LIST_DIRECTORIES FALSE "${OUTPUT_DIR}/assets/*")
 list(LENGTH extracted_resource_files extracted_resource_count)
 
 if(launcher_object_count GREATER 0)
@@ -115,9 +108,7 @@ if(launcher_object_count GREATER 0)
         "${launcher_object_count} launcher-managed assets (${extracted_resource_count} total resource files)."
     )
 else()
-    message(STATUS
-        "Extracted complete Minecraft 1.12.2 JAR assets (${extracted_resource_count} resource files)."
-    )
+    message(STATUS "Extracted complete Minecraft 1.12.2 JAR assets (${extracted_resource_count} resource files).")
     message(STATUS
         "Launcher asset objects were not imported. This does not affect JAR resources such as textures, "
         "models, blockstates, colormaps, structures, recipes, loot tables, advancements, shaders, fonts, or language files."

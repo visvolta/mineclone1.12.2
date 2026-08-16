@@ -88,6 +88,7 @@ WorldConfig WorldConfig::load(const std::filesystem::path& path) {
     if (values.contains("view_distance")) config.viewDistance = std::stoi(values.at("view_distance"));
     if (values.contains("vsync")) config.vsync = parseBoolean(values.at("vsync"));
     if (values.contains("target_fps")) config.targetFps = std::stoi(values.at("target_fps"));
+    if (values.contains("gui_scale")) config.guiScale = std::stoi(values.at("gui_scale"));
     if (values.contains("chunk_cache_capacity"))
         config.chunkCacheCapacity = std::stoi(values.at("chunk_cache_capacity"));
     if (values.contains("stream_main_thread_budget_ms"))
@@ -105,6 +106,8 @@ WorldConfig WorldConfig::load(const std::filesystem::path& path) {
         throw std::runtime_error("view_distance must be between 2 and 32");
     if (config.targetFps < 0 || config.targetFps > 1000)
         throw std::runtime_error("target_fps must be between 0 and 1000");
+    if (config.guiScale < 0 || config.guiScale > 3)
+        throw std::runtime_error("gui_scale must be 0 (Auto), 1 (Small), 2 (Normal), or 3 (Large)");
     if (config.chunkCacheCapacity < 0 || config.chunkCacheCapacity > 4096)
         throw std::runtime_error("chunk_cache_capacity must be between 0 and 4096");
     if (config.streamMainThreadBudgetMs <= 0.0 || config.streamMainThreadBudgetMs > 16.0)

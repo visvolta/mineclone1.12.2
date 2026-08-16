@@ -17,6 +17,8 @@ public:
 
     void bind(GLuint unit = 0) const;
     void updateAnimations(std::uint64_t rendererTick);
+    [[nodiscard]] GLuint id() const { return id_; }
+    [[nodiscard]] const TextureAtlasData& data() const { return data_; }
 
 private:
     struct AnimationState {

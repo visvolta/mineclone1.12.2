@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <string_view>
 
 enum class WorldType {
     Default,
@@ -30,6 +31,7 @@ struct WorldConfig {
     int viewDistance = 8;
     bool vsync = false;
     int targetFps = 120;
+    int guiScale = 0;
     int chunkCacheCapacity = 128;
     double streamMainThreadBudgetMs = 1.0;
     double lightMainThreadBudgetMs = 1.0;
