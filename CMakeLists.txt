@@ -54,6 +54,10 @@ if(MSVC)
 endif()
 
 set(BLOCKCRAFT_MINECRAFT_JAR "" CACHE FILEPATH "Path to a legitimate Minecraft 1.12.2 client JAR")
+set(BLOCKCRAFT_MINECRAFT_ASSETS_DIR "" CACHE PATH
+    "Optional path to the Minecraft launcher's assets directory; used to materialize launcher-managed resources such as sounds")
+set(BLOCKCRAFT_MINECRAFT_ASSET_INDEX "" CACHE FILEPATH
+    "Optional path to the Minecraft 1.12.2 launcher asset index JSON")
 
 if(NOT BLOCKCRAFT_MINECRAFT_JAR)
     set(BLOCKCRAFT_MINECRAFT_JAR "${CMAKE_CURRENT_SOURCE_DIR}/1.12.2.jar")
@@ -66,17 +70,71 @@ if(NOT EXISTS "${BLOCKCRAFT_MINECRAFT_JAR}")
     )
 endif()
 
+# Auto-detect the standard launcher asset store. The cache variables above can
+# still override these paths for Prism Launcher, MultiMC, portable installs, or
+# any other non-standard Minecraft directory.
+set(blockcraft_minecraft_home "")
+if(WIN32 AND DEFINED ENV{APPDATA})
+    file(TO_CMAKE_PATH "$ENV{APPDATA}/.minecraft" blockcraft_minecraft_home)
+elseif(DEFINED ENV{HOME})
+    file(TO_CMAKE_PATH "$ENV{HOME}/.minecraft" blockcraft_minecraft_home)
+endif()
+
+set(blockcraft_launcher_assets_dir "${BLOCKCRAFT_MINECRAFT_ASSETS_DIR}")
+if(NOT blockcraft_launcher_assets_dir AND
+   blockcraft_minecraft_home AND
+   EXISTS "${blockcraft_minecraft_home}/assets")
+    set(blockcraft_launcher_assets_dir "${blockcraft_minecraft_home}/assets")
+endif()
+
+set(blockcraft_asset_index_file "${BLOCKCRAFT_MINECRAFT_ASSET_INDEX}")
+if(NOT blockcraft_asset_index_file AND blockcraft_launcher_assets_dir)
+    # Prefer the exact asset-index id recorded by the local 1.12.2 launcher
+    # version metadata when it is available.
+    set(blockcraft_version_json "${blockcraft_minecraft_home}/versions/1.12.2/1.12.2.json")
+    if(EXISTS "${blockcraft_version_json}")
+        file(READ "${blockcraft_version_json}" blockcraft_version_metadata)
+        string(JSON blockcraft_asset_index_id ERROR_VARIABLE blockcraft_asset_index_error
+            GET "${blockcraft_version_metadata}" assetIndex id)
+        if(blockcraft_asset_index_error STREQUAL "NOTFOUND")
+            set(blockcraft_index_candidate
+                "${blockcraft_launcher_assets_dir}/indexes/${blockcraft_asset_index_id}.json")
+            if(EXISTS "${blockcraft_index_candidate}")
+                set(blockcraft_asset_index_file "${blockcraft_index_candidate}")
+            endif()
+        endif()
+    endif()
+
+    # Standard 1.12.2 installations use the 1.12 asset index. Keep a second
+    # candidate for launchers that store a version-named copy.
+    if(NOT blockcraft_asset_index_file)
+        foreach(blockcraft_index_name IN ITEMS 1.12 1.12.2)
+            set(blockcraft_index_candidate
+                "${blockcraft_launcher_assets_dir}/indexes/${blockcraft_index_name}.json")
+            if(EXISTS "${blockcraft_index_candidate}")
+                set(blockcraft_asset_index_file "${blockcraft_index_candidate}")
+                break()
+            endif()
+        endforeach()
+    endif()
+endif()
+
 set(BLOCKCRAFT_ASSET_ROOT "${CMAKE_BINARY_DIR}/minecraft-assets")
 message(STATUS "Using Minecraft 1.12.2 client JAR: ${BLOCKCRAFT_MINECRAFT_JAR}")
+if(blockcraft_asset_index_file)
+    message(STATUS "Using Minecraft launcher asset index: ${blockcraft_asset_index_file}")
+endif()
 execute_process(
-    COMMAND ${CMAKE_COMMAND}
-        -DMC_JAR=${BLOCKCRAFT_MINECRAFT_JAR}
-        -DOUTPUT_DIR=${BLOCKCRAFT_ASSET_ROOT}
-        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ExtractAssets.cmake
+    COMMAND "${CMAKE_COMMAND}"
+        "-DMC_JAR=${BLOCKCRAFT_MINECRAFT_JAR}"
+        "-DOUTPUT_DIR=${BLOCKCRAFT_ASSET_ROOT}"
+        "-DLAUNCHER_ASSETS_DIR=${blockcraft_launcher_assets_dir}"
+        "-DASSET_INDEX_FILE=${blockcraft_asset_index_file}"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/ExtractAssets.cmake"
     RESULT_VARIABLE asset_result
 )
 if(NOT asset_result EQUAL 0)
-    message(FATAL_ERROR "Could not extract the required Minecraft 1.12.2 assets.")
+    message(FATAL_ERROR "Could not extract the complete Minecraft 1.12.2 asset set.")
 endif()
 
 set(BLOCKCRAFT_CORE_SOURCES

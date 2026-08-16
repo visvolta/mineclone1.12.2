@@ -15,7 +15,7 @@ inline constexpr int atlasBorderPixels = 1;
 inline constexpr int atlasTilePixels = atlasContentPixels + atlasBorderPixels * 2;
 inline constexpr int atlasRows =
     (static_cast<int>(TextureId::FinalCount) + atlasColumns - 1) / atlasColumns;
-inline constexpr float atlasInset = 0.001F;
+inline constexpr float atlasInset = 0.0001F;
 
 constexpr AtlasBounds atlasBounds(TextureId texture) {
     const int index = static_cast<int>(texture);
