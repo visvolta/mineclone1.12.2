@@ -281,6 +281,13 @@ void GpuMesh::sortTranslucent(const glm::vec3& cameraLocal) {
         sorted.insert(sorted.end(), baseIndices_.begin() + static_cast<std::ptrdiff_t>(offset),
                       baseIndices_.begin() + static_cast<std::ptrdiff_t>(offset + 6));
     }
+    // GL_ELEMENT_ARRAY_BUFFER is VAO state in core OpenGL. Binding an EBO
+    // without first binding this mesh's VAO rewires whichever block mesh was
+    // drawn previously. The first translucent sort would therefore steal the
+    // EBO from a cutout mesh (commonly tall grass), and later translucent sorts
+    // could corrupt other water meshes until a section rebuild recreated the
+    // VAOs. Keep the sort update scoped to this translucent mesh.
+    glBindVertexArray(vao_);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo_);
     glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0,
                     static_cast<GLsizeiptr>(sorted.size() * sizeof(std::uint32_t)), sorted.data());

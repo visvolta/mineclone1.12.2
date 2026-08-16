@@ -229,31 +229,51 @@ void appendQuadIndices(MeshData& mesh, std::uint32_t first, bool reverse = false
 
 void addBakedQuad(MeshData& mesh, const SectionSnapshot& snapshot, BlockState state,
                   const BakedBlockModel& model, const BakedModelQuad& quad,
-                  int x, int y, int z) {
+                  int x, int y, int z, const BakedModelQuad* overlayQuad = nullptr) {
     if (quad.cullFace) {
         const Direction offset = direction(*quad.cullFace);
         if (!shouldRenderFace(state, snapshot.get(x + offset.x, y + offset.y, z + offset.z))) return;
     }
 
-    const std::array<float, 3> tint = tintFor(state, quad.tintIndex, snapshot, x, y, z);
+    // Vanilla grass uses two exactly coplanar model elements on each side:
+    // grass_side plus a biome-tinted grass_side_overlay. Keeping them as two
+    // independent depth-writing quads makes the overlay dependent on equal-
+    // depth rasterization. Collapse that specific layered model into the
+    // vertex format's base+overlay pair so the result is deterministic and the
+    // tint applies only to the overlay, matching the 1.12.2 resource model.
+    const int tintIndex = overlayQuad != nullptr ? overlayQuad->tintIndex : quad.tintIndex;
+    const std::array<float, 3> tint = tintFor(state, tintIndex, snapshot, x, y, z);
     const bool smoothAo = model.ambientOcclusion && BlockRegistry::get(state).lightValue == 0;
     const float directionalShade = quad.shade ? faceBrightness[static_cast<std::size_t>(quad.face)] : 1.0F;
     const std::uint32_t first = static_cast<std::uint32_t>(mesh.vertices.size());
     for (std::size_t index = 0; index < 4; ++index) {
         const VertexLighting lighting = vertexLighting(snapshot, quad.face, x, y, z,
                                                         quad.positions[index], smoothAo);
+        const glm::vec2 overlayUv = overlayQuad != nullptr
+            ? overlayQuad->uvs[index] : glm::vec2(0.0F);
         mesh.vertices.push_back({
             x + quad.positions[index].x,
             y + quad.positions[index].y,
             z + quad.positions[index].z,
             quad.uvs[index].x, quad.uvs[index].y,
             tint[0], tint[1], tint[2],
-            0.0F, 0.0F, 0.0F,
+            overlayUv.x, overlayUv.y, overlayQuad != nullptr ? 1.0F : 0.0F,
             directionalShade * lighting.ambientOcclusion,
             lighting.sky, lighting.block
         });
     }
     appendQuadIndices(mesh, first);
+}
+
+bool sameBakedQuadSurface(const BakedModelQuad& first, const BakedModelQuad& second) {
+    if (first.face != second.face || first.cullFace != second.cullFace) return false;
+    constexpr float epsilon = 1.0E-6F;
+    for (std::size_t index = 0; index < first.positions.size(); ++index) {
+        const glm::vec3 delta = first.positions[index] - second.positions[index];
+        if (std::abs(delta.x) > epsilon || std::abs(delta.y) > epsilon ||
+            std::abs(delta.z) > epsilon) return false;
+    }
+    return true;
 }
 
 std::array<glm::vec3, 4> legacyFaceCorners(Face face) {
@@ -540,9 +560,31 @@ bool addJsonModel(SectionMeshData& result, const SectionSnapshot& snapshot,
     bool emitted = false;
     for (const BakedBlockModel* model : models) {
         if (model == nullptr) continue;
-        for (const BakedModelQuad& quad : model->quads) {
+        const bool grass = static_cast<BlockId>(blockId(state)) == BlockId::Grass;
+        std::vector<bool> consumed(model->quads.size(), false);
+        for (std::size_t quadIndex = 0; quadIndex < model->quads.size(); ++quadIndex) {
+            if (consumed[quadIndex]) continue;
+            const BakedModelQuad& quad = model->quads[quadIndex];
+            const BakedModelQuad* overlay = nullptr;
+
+            // assets/minecraft/models/block/grass.json defines the four side
+            // overlays as later coplanar, tinted quads. Pair only this vanilla
+            // grass pattern; arbitrary resource-pack layered models remain
+            // independent quads.
+            if (grass && quad.tintIndex < 0) {
+                for (std::size_t candidateIndex = quadIndex + 1;
+                     candidateIndex < model->quads.size(); ++candidateIndex) {
+                    if (consumed[candidateIndex]) continue;
+                    const BakedModelQuad& candidate = model->quads[candidateIndex];
+                    if (candidate.tintIndex < 0 || !sameBakedQuadSurface(quad, candidate)) continue;
+                    overlay = &candidate;
+                    consumed[candidateIndex] = true;
+                    break;
+                }
+            }
+
             const std::size_t before = mesh.indices.size();
-            addBakedQuad(mesh, snapshot, state, *model, quad, x, y, z);
+            addBakedQuad(mesh, snapshot, state, *model, quad, x, y, z, overlay);
             emitted = emitted || mesh.indices.size() != before;
         }
     }
