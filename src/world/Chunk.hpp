@@ -1,0 +1,102 @@
+#pragma once
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "blocks/BlockState.hpp"
+
+inline constexpr int chunkSize = 16;
+inline constexpr int sectionSize = 16;
+inline constexpr int chunkHeight = 256;
+inline constexpr int sectionCount = chunkHeight / sectionSize;
+
+enum LightBorder : std::uint8_t {
+    LightBorderWest = 1U << 0U,
+    LightBorderEast = 1U << 1U,
+    LightBorderNorth = 1U << 2U,
+    LightBorderSouth = 1U << 3U
+};
+
+class ChunkSection {
+public:
+    [[nodiscard]] BlockState get(int x, int y, int z) const;
+    [[nodiscard]] bool set(int x, int y, int z, BlockState state);
+    [[nodiscard]] bool empty() const { return nonAirCount_ == 0; }
+    [[nodiscard]] std::uint16_t nonAirCount() const { return nonAirCount_; }
+    [[nodiscard]] const BlockState* data() const { return blocks_.data(); }
+
+private:
+    [[nodiscard]] static constexpr std::size_t index(int x, int y, int z) {
+        return static_cast<std::size_t>((y << 8) | (z << 4) | x);
+    }
+    std::array<BlockState, 4096> blocks_{};
+    std::uint16_t nonAirCount_ = 0;
+};
+
+class NibbleArray {
+public:
+    [[nodiscard]] std::uint8_t get(int x, int y, int z) const;
+    void set(int x, int y, int z, std::uint8_t value);
+
+private:
+    [[nodiscard]] static constexpr std::size_t index(int x, int y, int z) {
+        return static_cast<std::size_t>((y << 8) | (z << 4) | x);
+    }
+    std::array<std::uint8_t, 2048> bytes_{};
+};
+
+struct ChunkLightSection {
+    NibbleArray sky;
+    NibbleArray block;
+};
+
+// Generated tile-entity payloads are retained even before their gameplay
+// systems exist. `nbt` contains the exact uncompressed compound payload when
+// sourced from a vanilla structure template.
+struct GeneratedBlockEntity {
+    int x = 0;
+    int y = 0;
+    int z = 0;
+    std::string id;
+    std::vector<std::uint8_t> nbt;
+};
+
+class Chunk {
+public:
+    Chunk(int chunkX, int chunkZ) : x_(chunkX), z_(chunkZ) {}
+    [[nodiscard]] int x() const { return x_; }
+    [[nodiscard]] int z() const { return z_; }
+    [[nodiscard]] BlockState get(int localX, int y, int localZ) const;
+    [[nodiscard]] bool set(int localX, int y, int localZ, BlockState state);
+    [[nodiscard]] const ChunkSection* section(int index) const;
+    [[nodiscard]] std::uint8_t skyLight(int localX, int y, int localZ) const;
+    [[nodiscard]] std::uint8_t blockLight(int localX, int y, int localZ) const;
+    // Replaces both packed channels and returns a bit for each section whose
+    // stored values changed. Edit-time rendering uses this to rebuild only
+    // sections whose vertex light can actually differ.
+    std::uint16_t applyLighting(const std::vector<std::uint8_t>& sky,
+                                const std::vector<std::uint8_t>& block,
+                                std::uint8_t* dirtyBorders = nullptr);
+    void invalidateLighting() { lightingReady_ = false; }
+    [[nodiscard]] bool lightingReady() const { return lightingReady_; }
+    [[nodiscard]] std::uint64_t lightingRevision() const { return lightingRevision_; }
+    void setBiome(int localX, int localZ, std::uint8_t biome) { biomes_[static_cast<std::size_t>((localZ << 4) | localX)] = biome; }
+    [[nodiscard]] std::uint8_t biome(int localX, int localZ) const { return biomes_[static_cast<std::size_t>((localZ << 4) | localX)]; }
+    void addBlockEntity(GeneratedBlockEntity entity) { blockEntities_.push_back(std::move(entity)); }
+    [[nodiscard]] const std::vector<GeneratedBlockEntity>& blockEntities() const { return blockEntities_; }
+
+private:
+    int x_;
+    int z_;
+    std::array<std::unique_ptr<ChunkSection>, sectionCount> sections_{};
+    std::array<std::unique_ptr<ChunkLightSection>, sectionCount> lightSections_{};
+    std::array<std::uint8_t, 256> biomes_{};
+    std::vector<GeneratedBlockEntity> blockEntities_;
+    bool lightingReady_ = false;
+    std::uint64_t lightingRevision_ = 0;
+};

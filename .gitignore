@@ -1,0 +1,51 @@
+# CMake / Visual Studio build trees
+/build/
+/build-*/
+/cmake-build-*/
+/.vs/
+
+# CMake generated files if a build is accidentally configured in-tree
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+_deps/
+compile_commands.json
+
+# Visual Studio / MSVC generated files
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.user
+*.suo
+*.pdb
+*.ilk
+*.obj
+*.idb
+*.tlog
+*.lastbuildstate
+*.exp
+*.lib
+*.dll
+*.exe
+
+# Misc generated output
+*.log
+*.jar
+*.zip
+*.7z
+
+# IDE/compiler caches
+.cache/
+*.VC.db
+*.VC.VC.opendb
+*.recipe
+
+# Extracted runtime assets (normally inside build/)
+/minecraft-assets/
+
+# Local game client artifact used for generation but not committed to source control
+# (the project expects a legitimate 1.12.2 Java client JAR to exist locally)
+1.12.2.jar

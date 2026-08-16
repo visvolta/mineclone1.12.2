@@ -1,0 +1,82 @@
+@echo off
+setlocal EnableExtensions EnableDelayedExpansion
+
+rem Always build relative to this script, even when launched by double-click.
+cd /d "%~dp0"
+
+set "CMAKE_EXE="
+set "VS_ROOT="
+set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
+
+for /f "delims=" %%I in ('where cmake 2^>nul') do if not defined CMAKE_EXE set "CMAKE_EXE=%%I"
+if not defined CMAKE_EXE if exist "%VSWHERE%" (
+    for /f "usebackq delims=" %%I in (`"%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VS_ROOT=%%I"
+)
+if not defined CMAKE_EXE if defined VS_ROOT if exist "%VS_ROOT%\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" (
+    set "CMAKE_EXE=%VS_ROOT%\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
+)
+
+if not defined CMAKE_EXE (
+    echo.
+    echo ERROR: CMake was not found.
+    echo Install "C++ CMake tools for Windows" from Visual Studio Installer,
+    echo or run: winget install --id Kitware.CMake -e
+    echo.
+    pause
+    exit /b 1
+)
+
+if not exist "1.12.2.jar" (
+    echo.
+    echo ERROR: 1.12.2.jar was not found beside CMakeLists.txt.
+    echo Place your legitimate Minecraft 1.12.2 client JAR in this project root.
+    echo.
+    pause
+    exit /b 1
+)
+
+for %%I in ("%CMAKE_EXE%") do set "CTEST_EXE=%%~dpIctest.exe"
+if not exist "%CTEST_EXE%" (
+    echo.
+    echo ERROR: ctest.exe was not found beside CMake.
+    echo.
+    pause
+    exit /b 1
+)
+
+echo Using CMake: %CMAKE_EXE%
+echo Using build directory: %CD%\build
+echo.
+
+rem Use the normal project build directory for every configuration. Reconfigure
+rem first so changes to CMakeLists.txt and compile definitions are picked up.
+"%CMAKE_EXE%" -S . -B build -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTING=ON
+if errorlevel 1 goto :failed
+
+rem Clean Release objects before rebuilding to avoid stale objects after block
+rem registry/header changes.
+"%CMAKE_EXE%" --build build --config Release --target blockcraft blockcraft_tests blockcraft_registry_tests --parallel --clean-first
+if errorlevel 1 goto :failed
+
+"%CTEST_EXE%" --test-dir build -C Release --output-on-failure
+if errorlevel 1 goto :failed
+
+if not exist "build\Release\blockcraft.exe" (
+    echo.
+    echo ERROR: Build completed without producing build\Release\blockcraft.exe.
+    goto :failed
+)
+
+echo.
+echo Release build and tests completed successfully.
+echo Game: %CD%\build\Release\blockcraft.exe
+echo.
+pause
+exit /b 0
+
+:failed
+echo.
+echo Release build failed. Review the error shown above.
+echo.
+pause
+exit /b 1
