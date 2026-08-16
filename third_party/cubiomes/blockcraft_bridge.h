@@ -10,6 +10,7 @@ extern "C" {
 typedef void* CbGeneratorHandle;
 typedef void* CbSurfaceNoiseHandle;
 typedef void* CbColorNoiseHandle;
+typedef void* CbMesaNoiseHandle;
 
 CbGeneratorHandle cbCreateGenerator(int64_t seed, int largeBiomes, int default11, int fixedBiome);
 void cbDestroyGenerator(CbGeneratorHandle handle);
@@ -31,6 +32,12 @@ CbColorNoiseHandle cbCreateColorNoise(void);
 void cbDestroyColorNoise(CbColorNoiseHandle handle);
 double cbSampleTemperatureNoise(CbColorNoiseHandle handle, double x, double z);
 double cbSampleGrassColorNoise(CbColorNoiseHandle handle, double x, double z);
+
+CbMesaNoiseHandle cbCreateMesaNoise(int64_t seed);
+void cbDestroyMesaNoise(CbMesaNoiseHandle handle);
+double cbSampleMesaPillarNoise(CbMesaNoiseHandle handle, double x, double z);
+double cbSampleMesaRoofNoise(CbMesaNoiseHandle handle, double x, double z);
+double cbSampleMesaBandOffsetNoise(CbMesaNoiseHandle handle, double x, double z);
 
 #ifdef __cplusplus
 }

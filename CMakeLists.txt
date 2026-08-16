@@ -9,6 +9,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 include(FetchContent)
 find_package(Threads REQUIRED)
+find_package(ZLIB REQUIRED)
 
 # Visual Studio's stock Debug flags use /Od and /RTC1. Runtime checks cannot
 # coexist with optimization, so remove only /RTC1 and apply /O2 per project
@@ -141,6 +142,8 @@ set(BLOCKCRAFT_CORE_SOURCES
     src/core/Json.cpp
     src/core/ThreadPool.cpp
     src/worldgen/ChunkGeneratorSettings.cpp
+    src/worldgen/FlatGeneratorSettings.cpp
+    src/worldgen/StructureTemplate.cpp
     src/environment/Environment.cpp
     src/blocks/BlockRegistry.cpp
     src/lighting/LightSolver.cpp
@@ -185,7 +188,7 @@ target_compile_definitions(blockcraft PRIVATE
     $<$<AND:$<CONFIG:Debug>,$<CXX_COMPILER_ID:MSVC>>:BLOCKCRAFT_OPTIMIZED_DEBUG=1>
 )
 configure_file(world.cfg world.cfg COPYONLY)
-target_link_libraries(blockcraft PRIVATE glfw glad_gl_core_33 glm::glm cubiomes Threads::Threads)
+target_link_libraries(blockcraft PRIVATE glfw glad_gl_core_33 glm::glm cubiomes Threads::Threads ZLIB::ZLIB)
 
 if(MSVC)
     target_compile_options(blockcraft PRIVATE /W4 /permissive- $<$<CONFIG:Debug>:/O2>)
@@ -200,7 +203,7 @@ if(BUILD_TESTING)
     target_compile_definitions(blockcraft_tests PRIVATE
         BLOCKCRAFT_ASSET_ROOT="${BLOCKCRAFT_ASSET_ROOT}"
     )
-    target_link_libraries(blockcraft_tests PRIVATE glm::glm cubiomes Threads::Threads)
+    target_link_libraries(blockcraft_tests PRIVATE glm::glm cubiomes Threads::Threads ZLIB::ZLIB)
     if(MSVC)
         target_compile_options(blockcraft_tests PRIVATE $<$<CONFIG:Debug>:/O2> /UNDEBUG)
     else()

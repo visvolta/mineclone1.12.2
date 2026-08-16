@@ -2,10 +2,7 @@
 
 #include <algorithm>
 #include <array>
-#include <charconv>
 #include <cmath>
-#include <string>
-#include <string_view>
 #include <vector>
 
 extern "C" {
@@ -17,6 +14,7 @@ extern "C" {
 #include "worldgen/BiomeProvider.hpp"
 #include "worldgen/CaveGenerator.hpp"
 #include "worldgen/ChunkGeneratorSettings.hpp"
+#include "worldgen/FlatGeneratorSettings.hpp"
 #include "worldgen/JavaRandom.hpp"
 
 namespace {
@@ -33,11 +31,11 @@ std::int64_t chunkTerrainSeed(int x, int z) {
     return static_cast<std::int64_t>(wrappedMultiply(x, 341873128712LL) + wrappedMultiply(z, 132897987541LL));
 }
 
-void surfaceBlocks(int biomeId, BlockState& top, BlockState& filler) {
+void surfaceBlocks(int biomeId, double noise, BlockState& top, BlockState& filler) {
     top = block(BlockId::Grass);
     filler = block(BlockId::Dirt);
     switch (biomeId) {
-        case 2: case 16: case 17: case 26: case 35: case 36:
+        case 2: case 16: case 17: case 26: case 130:
             top = filler = block(BlockId::Sand); break;
         case 14: case 15:
             top = block(BlockId::Mycelium); filler = block(BlockId::Dirt); break;
@@ -47,92 +45,102 @@ void surfaceBlocks(int biomeId, BlockState& top, BlockState& filler) {
             top = filler = block(BlockId::HardenedClay); break;
         default: break;
     }
-}
-
-struct FlatLayer {
-    int count;
-    BlockState state;
-};
-
-std::vector<std::string_view> split(std::string_view text, char delimiter) {
-    std::vector<std::string_view> parts;
-    std::size_t start = 0;
-    while (start <= text.size()) {
-        const std::size_t end = text.find(delimiter, start);
-        parts.push_back(text.substr(start, end == std::string_view::npos ? text.size() - start : end - start));
-        if (end == std::string_view::npos) break;
-        start = end + 1;
+    const bool mutatedHills = biomeId == 131 || biomeId == 162;
+    if (mutatedHills && (noise < -1.0 || noise > 2.0)) {
+        top = filler = block(BlockId::Gravel);
+    } else if ((biomeId == 3 || mutatedHills) && noise > 1.0) {
+        top = filler = block(BlockId::Stone);
     }
-    return parts;
-}
-
-int parseInteger(std::string_view text, int fallback) {
-    int value = 0;
-    const auto result = std::from_chars(text.data(), text.data() + text.size(), value);
-    return result.ec == std::errc{} && result.ptr == text.data() + text.size() ? value : fallback;
-}
-
-BlockState flatBlock(std::string_view name, int metadata) {
-    if (name.starts_with("minecraft:")) name.remove_prefix(10);
-    const std::array<std::pair<std::string_view, BlockId>, 24> names = {{
-        {"air", BlockId::Air}, {"stone", BlockId::Stone}, {"grass", BlockId::Grass},
-        {"dirt", BlockId::Dirt}, {"cobblestone", BlockId::Cobblestone}, {"planks", BlockId::Planks},
-        {"bedrock", BlockId::Bedrock}, {"water", BlockId::Water}, {"lava", BlockId::Lava},
-        {"sand", BlockId::Sand}, {"gravel", BlockId::Gravel}, {"gold_ore", BlockId::GoldOre},
-        {"iron_ore", BlockId::IronOre}, {"coal_ore", BlockId::CoalOre}, {"log", BlockId::Log},
-        {"leaves", BlockId::Leaves}, {"glass", BlockId::Glass}, {"lapis_ore", BlockId::LapisOre},
-        {"sandstone", BlockId::Sandstone}, {"diamond_ore", BlockId::DiamondOre},
-        {"redstone_ore", BlockId::RedstoneOre}, {"snow", BlockId::Snow},
-        {"clay", BlockId::Clay}, {"hardened_clay", BlockId::HardenedClay}
-    }};
-    for (const auto& [candidate, id] : names)
-        if (name == candidate) return block(id, static_cast<std::uint8_t>(metadata & 15));
-    const int numeric = parseInteger(name, -1);
-    return numeric >= 0 && numeric <= 4095
-        ? makeBlockState(static_cast<std::uint16_t>(numeric), static_cast<std::uint8_t>(metadata & 15))
-        : block(BlockId::Air);
-}
-
-void parseFlatSettings(std::string_view settings, std::vector<FlatLayer>& layers, int& biome) {
-    layers = {{1, block(BlockId::Bedrock)}, {2, block(BlockId::Dirt)}, {1, block(BlockId::Grass)}};
-    biome = 1;
-    if (settings.empty() || settings == "{}") return;
-    const std::vector<std::string_view> fields = split(settings, ';');
-    if (fields.size() < 2) return;
-    const int version = parseInteger(fields[0], -1);
-    if (version < 0 || version > 3) return;
-    std::vector<FlatLayer> parsed;
-    int height = 0;
-    for (std::string_view description : split(fields[1], ',')) {
-        const char multiplier = version >= 3 ? '*' : 'x';
-        const std::size_t separator = description.find(multiplier);
-        int count = 1;
-        if (separator != std::string_view::npos) {
-            count = std::clamp(parseInteger(description.substr(0, separator), 0), 0, 256 - height);
-            description.remove_prefix(separator + 1);
-        }
-        int metadata = 0;
-        std::string_view name = description;
-        if (version >= 3) {
-            const std::size_t namespaceSeparator = description.find(':');
-            const std::size_t metadataSeparator = namespaceSeparator == std::string_view::npos
-                ? std::string_view::npos : description.find(':', namespaceSeparator + 1);
-            if (metadataSeparator != std::string_view::npos) {
-                metadata = parseInteger(description.substr(metadataSeparator + 1), 0);
-                name = description.substr(0, metadataSeparator);
-            }
-        } else {
-            const std::size_t metadataSeparator = description.find(':');
-            if (metadataSeparator != std::string_view::npos) {
-                metadata = parseInteger(description.substr(metadataSeparator + 1), 0);
-                name = description.substr(0, metadataSeparator);
-            }
-        }
-        if (count > 0) parsed.push_back({count, flatBlock(name, metadata)});
-        height += count;
+    if (biomeId == 32 || biomeId == 33 || biomeId == 160 || biomeId == 161) {
+        if (noise > 1.75) top = block(BlockId::Dirt, 1);       // coarse dirt
+        else if (noise > -0.95) top = block(BlockId::Dirt, 2); // podzol
     }
-    if (!parsed.empty()) layers = std::move(parsed);
-    if (fields.size() > 2) biome = parseInteger(fields[2], 1);
+    if (biomeId == 163 || biomeId == 164) {
+        if (noise > 1.75) top = filler = block(BlockId::Stone);
+        else if (noise > -0.5) top = block(BlockId::Dirt, 1);
+    }
+}
+
+void generateMesaColumn(World& world, JavaRandom& random, CbMesaNoiseHandle mesaNoise,
+                        const std::array<BlockState, 64>& bands, int worldSeedSeaLevel,
+                        int biomeId, int x, int z, double noise) {
+    const bool bryce = biomeId == 165;
+    const bool forest = biomeId == 38 || biomeId == 166;
+    double pillarHeight = 0.0;
+    if (bryce) {
+        const int mixedX = (x & -16) + (z & 15);
+        const int mixedZ = (z & -16) + (x & 15);
+        const double pillar = cbSampleMesaPillarNoise(mesaNoise, mixedX * 0.25, mixedZ * 0.25);
+        const double base = std::min(std::abs(noise), pillar);
+        if (base > 0.0) {
+            const double roof = std::abs(cbSampleMesaRoofNoise(
+                mesaNoise, mixedX * 0.001953125, mixedZ * 0.001953125));
+            pillarHeight = std::min(base * base * 2.5, std::ceil(roof * 50.0) + 14.0) + 64.0;
+        }
+    }
+
+    const int thickness = static_cast<int>(noise / 3.0 + 3.0 + random.nextDouble() * 0.25);
+    const bool solidBand = std::cos(noise / 3.0 * 3.14159265358979323846) > 0.0;
+    int remaining = -1;
+    bool redSandCap = false;
+    int stoneCount = 0;
+    const auto bandAt = [&](int y) {
+        const int offset = static_cast<int>(std::llround(cbSampleMesaBandOffsetNoise(
+            mesaNoise, x / 512.0, x / 512.0) * 2.0));
+        return bands[static_cast<std::size_t>((y + offset + 64) % 64)];
+    };
+
+    for (int y = 255; y >= 0; --y) {
+        if (blockId(world.getBlock(x, y, z)) == 0 && y < static_cast<int>(pillarHeight))
+            world.setGeneratedBlock(x, y, z, block(BlockId::Stone));
+        if (y <= random.nextInt(5)) {
+            world.setGeneratedBlock(x, y, z, block(BlockId::Bedrock));
+            continue;
+        }
+        if (stoneCount >= 15 && !bryce) continue;
+        const BlockId current = static_cast<BlockId>(blockId(world.getBlock(x, y, z)));
+        if (current == BlockId::Air) {
+            remaining = -1;
+        } else if (current == BlockId::Stone) {
+            if (remaining == -1) {
+                redSandCap = false;
+                BlockState top = block(BlockId::StainedHardenedClay);
+                BlockState filler = block(BlockId::StainedHardenedClay);
+                if (thickness <= 0) {
+                    top = block(BlockId::Air);
+                    filler = block(BlockId::Stone);
+                } else if (y >= worldSeedSeaLevel - 4 && y <= worldSeedSeaLevel + 1) {
+                    top = block(BlockId::StainedHardenedClay);
+                    filler = block(BlockId::StainedHardenedClay);
+                }
+                if (y < worldSeedSeaLevel && blockId(top) == 0) top = block(BlockId::Water);
+                remaining = thickness + std::max(0, y - worldSeedSeaLevel);
+                if (y >= worldSeedSeaLevel - 1) {
+                    if (forest && y > 86 + thickness * 2)
+                        world.setGeneratedBlock(x, y, z,
+                            solidBand ? block(BlockId::Dirt, 1) : block(BlockId::Grass));
+                    else if (y > worldSeedSeaLevel + 3 + thickness) {
+                        if (y >= 64 && y <= 127)
+                            world.setGeneratedBlock(x, y, z,
+                                solidBand ? block(BlockId::HardenedClay) : bandAt(y));
+                        else world.setGeneratedBlock(x, y, z, block(BlockId::StainedHardenedClay, 1));
+                    } else {
+                        world.setGeneratedBlock(x, y, z, block(BlockId::Sand, 1));
+                        redSandCap = true;
+                    }
+                } else {
+                    world.setGeneratedBlock(x, y, z,
+                        blockId(filler) == static_cast<std::uint16_t>(BlockId::StainedHardenedClay)
+                            ? block(BlockId::StainedHardenedClay, 1) : filler);
+                }
+            } else if (remaining > 0) {
+                --remaining;
+                world.setGeneratedBlock(x, y, z,
+                    redSandCap ? block(BlockId::StainedHardenedClay, 1) : bandAt(y));
+            }
+            ++stoneCount;
+        }
+    }
 }
 
 } // namespace
@@ -142,24 +150,60 @@ struct TerrainGenerator::Implementation {
         : config(input), settings(ChunkGeneratorSettings::fromConfig(input)),
           biomes(input), caves(input.seed) {
         surfaceNoise = cbCreateSurfaceNoise(input.seed);
-        if (surfaceNoise == nullptr) throw std::bad_alloc();
+        colorNoise = cbCreateColorNoise();
+        mesaNoise = cbCreateMesaNoise(input.seed);
+        if (surfaceNoise == nullptr || colorNoise == nullptr || mesaNoise == nullptr) throw std::bad_alloc();
+        clayBands.fill(block(BlockId::HardenedClay));
+        JavaRandom bandRandom(input.seed);
+        for (int index = 0; index < 64; ++index) {
+            index += bandRandom.nextInt(5) + 1;
+            if (index < 64) clayBands[static_cast<std::size_t>(index)] = block(BlockId::StainedHardenedClay, 1);
+        }
+        const auto stripes = [&](int count, int minimumWidth, int widthRange, std::uint8_t metadata) {
+            for (int stripe = 0; stripe < count; ++stripe) {
+                const int width = bandRandom.nextInt(widthRange) + minimumWidth;
+                const int start = bandRandom.nextInt(64);
+                for (int offset = 0; start + offset < 64 && offset < width; ++offset)
+                    clayBands[static_cast<std::size_t>(start + offset)] =
+                        block(BlockId::StainedHardenedClay, metadata);
+            }
+        };
+        stripes(bandRandom.nextInt(4) + 2, 1, 3, 4);  // yellow
+        stripes(bandRandom.nextInt(4) + 2, 2, 3, 12); // brown
+        stripes(bandRandom.nextInt(4) + 2, 1, 3, 14); // red
+        int whiteY = 0;
+        for (int stripe = 0, count = bandRandom.nextInt(3) + 3; stripe < count; ++stripe) {
+            whiteY += bandRandom.nextInt(16) + 4;
+            if (whiteY >= 64) continue;
+            clayBands[static_cast<std::size_t>(whiteY)] = block(BlockId::StainedHardenedClay, 0);
+            if (whiteY > 1 && bandRandom.nextBoolean())
+                clayBands[static_cast<std::size_t>(whiteY - 1)] = block(BlockId::StainedHardenedClay, 8);
+            if (whiteY < 63 && bandRandom.nextBoolean())
+                clayBands[static_cast<std::size_t>(whiteY + 1)] = block(BlockId::StainedHardenedClay, 8);
+        }
         for (int z = -2; z <= 2; ++z)
             for (int x = -2; x <= 2; ++x)
                 weights[static_cast<std::size_t>((x + 2) + (z + 2) * 5)] =
                     10.0F / std::sqrt(static_cast<float>(x * x + z * z) + 0.2F);
-        parseFlatSettings(input.generatorOptions, flatLayers, flatBiome);
+        flat = FlatGeneratorSettings::parse(input.generatorOptions);
     }
 
     WorldConfig config;
     ChunkGeneratorSettings settings;
     BiomeProvider biomes;
     CaveGenerator caves;
-    ~Implementation() { cbDestroySurfaceNoise(surfaceNoise); }
+    ~Implementation() {
+        cbDestroySurfaceNoise(surfaceNoise);
+        cbDestroyColorNoise(colorNoise);
+        cbDestroyMesaNoise(mesaNoise);
+    }
 
     CbSurfaceNoiseHandle surfaceNoise = nullptr;
+    CbColorNoiseHandle colorNoise = nullptr;
+    CbMesaNoiseHandle mesaNoise = nullptr;
+    std::array<BlockState, 64> clayBands{};
     std::array<float, 25> weights{};
-    std::vector<FlatLayer> flatLayers;
-    int flatBiome = 1;
+    FlatGeneratorSettings flat;
 };
 
 TerrainGenerator::TerrainGenerator(const WorldConfig& config)
@@ -192,11 +236,11 @@ void TerrainGenerator::generateChunk(World& world, int chunkX, int chunkZ) {
     if (implementation_->config.worldType == WorldType::Flat) {
         for (int z = 0; z < 16; ++z) for (int x = 0; x < 16; ++x) {
             int y = 0;
-            for (const FlatLayer& layer : implementation_->flatLayers) {
+            for (const FlatLayer& layer : implementation_->flat.layers) {
                 for (int count = 0; count < layer.count && y < chunkHeight; ++count, ++y)
                     world.setGeneratedBlock(originX + x, y, originZ + z, layer.state);
             }
-            chunk.setBiome(x, z, static_cast<std::uint8_t>(implementation_->flatBiome));
+            chunk.setBiome(x, z, static_cast<std::uint8_t>(implementation_->flat.biome));
         }
         return;
     }
@@ -307,9 +351,32 @@ void TerrainGenerator::generateChunk(World& world, int chunkX, int chunkZ) {
         chunk.setBiome(x, z, static_cast<std::uint8_t>(biomeId));
         BlockState top;
         BlockState filler;
-        surfaceBlocks(biomeId, top, filler);
         const double surface = cbSampleSurfaceOctaves(implementation_->surfaceNoise,
             (originX + x) * 0.0625, (originZ + z) * 0.0625);
+        if (biomeId == 37 || biomeId == 38 || biomeId == 39 || biomeId == 165 ||
+            biomeId == 166 || biomeId == 167) {
+            generateMesaColumn(world, random, implementation_->mesaNoise,
+                implementation_->clayBands, implementation_->settings.seaLevel,
+                biomeId, originX + x, originZ + z, surface);
+            continue;
+        }
+        surfaceBlocks(biomeId, surface, top, filler);
+
+        const double swampNoise = cbSampleGrassColorNoise(implementation_->colorNoise,
+            (originX + x) * 0.25, (originZ + z) * 0.25);
+        if ((biomeId == 6 || biomeId == 134) && swampNoise > 0.0) {
+            for (int y = 255; y >= 0; --y) {
+                if (blockId(world.getBlock(originX + x, y, originZ + z)) == 0) continue;
+                const BlockId found = static_cast<BlockId>(blockId(
+                    world.getBlock(originX + x, y, originZ + z)));
+                if (y == 62 && found != BlockId::Water && found != BlockId::FlowingWater) {
+                    world.setGeneratedBlock(originX + x, y, originZ + z, block(BlockId::Water));
+                    if (swampNoise < 0.12)
+                        world.setGeneratedBlock(originX + x, y + 1, originZ + z, block(BlockId::Waterlily));
+                }
+                break;
+            }
+        }
         const int thickness = static_cast<int>(surface / 3.0 + 3.0 + random.nextDouble() * 0.25);
         int remaining = -1;
         const BlockState biomeTop = top;

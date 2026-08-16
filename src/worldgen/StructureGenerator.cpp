@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <cmath>
 #include <cstdint>
 #include <string>
@@ -133,19 +134,47 @@ void addLootChest(World& world, int x, int y, int z, std::string_view table,
     world.addGeneratedBlockEntity(std::move(entity));
 }
 
+int flatInteger(const FlatFeatureOptions* options, std::string_view name,
+                int fallback, int minimum) {
+    if (options == nullptr) return fallback;
+    const auto found = options->find(name);
+    if (found == options->end()) return fallback;
+    int value = fallback;
+    const auto parsed = std::from_chars(found->second.data(),
+        found->second.data() + found->second.size(), value);
+    return parsed.ec == std::errc{} ? std::max(value, minimum) : fallback;
+}
+
+double flatDouble(const FlatFeatureOptions* options, std::string_view name,
+                  double fallback, double minimum = 0.0) {
+    if (options == nullptr) return fallback;
+    const auto found = options->find(name);
+    if (found == options->end()) return fallback;
+    double value = fallback;
+    const auto parsed = std::from_chars(found->second.data(),
+        found->second.data() + found->second.size(), value);
+    return parsed.ec == std::errc{} ? std::max(value, minimum) : fallback;
+}
+
 } // namespace
 
 StructureGenerator::StructureGenerator(const WorldConfig& config)
     : config_(config), settings_(ChunkGeneratorSettings::fromConfig(config)),
+      flat_(FlatGeneratorSettings::parse(config.generatorOptions)),
       biomes_(std::make_unique<BiomeProvider>(config)) {
+    const FlatFeatureOptions* strongholdOptions = config.worldType == WorldType::Flat
+        ? flat_.feature("stronghold") : nullptr;
+    const int strongholdCount = flatInteger(strongholdOptions, "count", 128, 1);
+    const double strongholdDistance = flatDouble(strongholdOptions, "distance", 32.0, 1.0);
     JavaRandom random(config.seed);
     double angle = random.nextDouble() * pi * 2.0;
     int ring = 0;
     int inRing = 0;
-    int spread = 3;
-    strongholds_.reserve(128);
-    for (int index = 0; index < 128; ++index) {
-        const double distance = 128.0 + ring * 192.0 + (random.nextDouble() - 0.5) * 80.0;
+    int spread = flatInteger(strongholdOptions, "spread", 3, 1);
+    strongholds_.reserve(static_cast<std::size_t>(strongholdCount));
+    for (int index = 0; index < strongholdCount; ++index) {
+        const double distance = 4.0 * strongholdDistance + ring * strongholdDistance * 6.0 +
+            (random.nextDouble() - 0.5) * strongholdDistance * 2.5;
         int chunkX = static_cast<int>(std::llround(std::cos(angle) * distance));
         int chunkZ = static_cast<int>(std::llround(std::sin(angle) * distance));
 
@@ -174,7 +203,7 @@ StructureGenerator::StructureGenerator(const WorldConfig& config)
             ++ring;
             inRing = 0;
             spread += 2 * spread / (ring + 1);
-            spread = std::min(spread, 128 - index - 1);
+            spread = std::min(spread, strongholdCount - index);
             angle += random.nextDouble() * pi * 2.0;
         }
     }
@@ -182,33 +211,47 @@ StructureGenerator::StructureGenerator(const WorldConfig& config)
 
 StructureGenerator::~StructureGenerator() = default;
 
-bool StructureGenerator::startType(int chunkX, int chunkZ, Type& type) const {
+std::vector<StructureGenerator::Type> StructureGenerator::startTypes(int chunkX, int chunkZ) const {
+    std::vector<Type> result;
+    const bool flatWorld = config_.worldType == WorldType::Flat;
+    const auto enabled = [&](std::string_view feature, bool overworldDefault) {
+        return flatWorld ? flat_.hasFeature(feature) : overworldDefault;
+    };
     const int biome = biomes_->getBiomes(chunkX * 16 + 8, chunkZ * 16 + 8, 1, 1).front();
-    if (settings_.useMansions &&
+    const int villageSpacing = flatWorld
+        ? flatInteger(flat_.feature("village"), "distance", 32, 9) : 32;
+    const int templeSpacing = flatWorld
+        ? flatInteger(flat_.feature("biome_1"), "distance", 32, 9) : 32;
+    const int monumentSpacing = flatWorld
+        ? flatInteger(flat_.feature("oceanmonument"), "spacing", 32, 1) : 32;
+    const int monumentSeparation = flatWorld
+        ? flatInteger(flat_.feature("oceanmonument"), "separation", 5, 1) : 5;
+    if (enabled("mansion", settings_.useMansions) &&
         spacingCandidate(config_.seed, chunkX, chunkZ, 80, 20, 10387319, true) &&
-        (biome == 29 || biome == 157)) { type = Type::Mansion; return true; }
-    if (settings_.useMonuments &&
-        spacingCandidate(config_.seed, chunkX, chunkZ, 32, 5, 10387313, true) && biome == 24) {
-        type = Type::Monument; return true;
+        (biome == 29 || biome == 157)) result.push_back(Type::Mansion);
+    if (enabled("oceanmonument", settings_.useMonuments) &&
+        monumentSpacing > monumentSeparation && spacingCandidate(config_.seed, chunkX, chunkZ,
+            monumentSpacing, monumentSeparation, 10387313, true) && biome == 24) {
+        result.push_back(Type::Monument);
     }
-    if (settings_.useVillages &&
-        spacingCandidate(config_.seed, chunkX, chunkZ, 32, 8, 10387312, false) &&
+    if (enabled("village", settings_.useVillages) &&
+        spacingCandidate(config_.seed, chunkX, chunkZ, villageSpacing, 8, 10387312, false) &&
         (biome == 1 || biome == 2 || biome == 5 || biome == 35)) {
-        type = Type::Village; return true;
+        result.push_back(Type::Village);
     }
-    if (settings_.useTemples &&
-        spacingCandidate(config_.seed, chunkX, chunkZ, 32, 8, 14357617, false)) {
-        if (biome == 2 || biome == 17) { type = Type::DesertPyramid; return true; }
-        if (biome == 21 || biome == 22) { type = Type::JungleTemple; return true; }
-        if (biome == 6) { type = Type::SwampHut; return true; }
-        if (biome == 12 || biome == 30) { type = Type::Igloo; return true; }
+    if (enabled("biome_1", settings_.useTemples) &&
+        spacingCandidate(config_.seed, chunkX, chunkZ, templeSpacing, 8, 14357617, false)) {
+        if (biome == 2 || biome == 17) result.push_back(Type::DesertPyramid);
+        if (biome == 21 || biome == 22) result.push_back(Type::JungleTemple);
+        if (biome == 6) result.push_back(Type::SwampHut);
+        if (biome == 12 || biome == 30) result.push_back(Type::Igloo);
     }
-    if (settings_.useStrongholds &&
+    if (enabled("stronghold", settings_.useStrongholds) &&
         std::find(strongholds_.begin(), strongholds_.end(), std::pair{chunkX, chunkZ}) != strongholds_.end()) {
-        type = Type::Stronghold; return true;
+        result.push_back(Type::Stronghold);
     }
 
-    if (!settings_.useMineShafts) return false;
+    if (!enabled("mineshaft", settings_.useMineShafts)) return result;
     JavaRandom seedRandom(config_.seed);
     const std::int64_t first = seedRandom.nextLong();
     const std::int64_t second = seedRandom.nextLong();
@@ -218,10 +261,19 @@ bool StructureGenerator::startType(int chunkX, int chunkZ, Type& type) const {
         static_cast<std::uint64_t>(config_.seed);
     JavaRandom mineRandom(static_cast<std::int64_t>(mixed));
     static_cast<void>(mineRandom.nextInt());
-    if (mineRandom.nextDouble() < 0.004 && mineRandom.nextInt(80) < std::max(std::abs(chunkX), std::abs(chunkZ))) {
-        type = Type::Mineshaft; return true;
+    const double mineChance = flatWorld
+        ? flatDouble(flat_.feature("mineshaft"), "chance", 0.004) : 0.004;
+    if (mineRandom.nextDouble() < mineChance && mineRandom.nextInt(80) < std::max(std::abs(chunkX), std::abs(chunkZ))) {
+        result.push_back(Type::Mineshaft);
     }
-    return false;
+    return result;
+}
+
+bool StructureGenerator::startType(int chunkX, int chunkZ, Type& type) const {
+    const std::vector<Type> types = startTypes(chunkX, chunkZ);
+    if (types.empty()) return false;
+    type = types.front();
+    return true;
 }
 
 bool StructureGenerator::isStructureStart(int chunkX, int chunkZ) const {
@@ -364,8 +416,8 @@ void StructureGenerator::generateStartsIntersecting(World& world, int minimumChu
     // complete regardless of which region job produced it.
     for (int chunkZ = minimumChunkZ - 8; chunkZ <= maximumChunkZ + 8; ++chunkZ) {
         for (int chunkX = minimumChunkX - 8; chunkX <= maximumChunkX + 8; ++chunkX) {
-            Type type{};
-            if (startType(chunkX, chunkZ, type)) place(world, type, chunkX, chunkZ);
+            for (const Type type : startTypes(chunkX, chunkZ))
+                place(world, type, chunkX, chunkZ);
         }
     }
 }

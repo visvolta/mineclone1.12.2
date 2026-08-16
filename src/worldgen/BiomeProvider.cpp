@@ -4,6 +4,8 @@
 #include <array>
 #include <stdexcept>
 
+#include "worldgen/FlatGeneratorSettings.hpp"
+
 extern "C" {
 #include "blockcraft_bridge.h"
 }
@@ -65,7 +67,9 @@ struct BiomeProvider::Implementation {
 BiomeProvider::BiomeProvider(const WorldConfig& config)
     : implementation_(std::make_unique<Implementation>()) {
     const int fixedBiome = config.worldType == WorldType::Customized
-        ? generatorOptionInt(config.generatorOptions, "fixedBiome", -1) : -1;
+        ? generatorOptionInt(config.generatorOptions, "fixedBiome", -1)
+        : (config.worldType == WorldType::Flat
+            ? FlatGeneratorSettings::parse(config.generatorOptions).biome : -1);
     implementation_->generator = cbCreateGenerator(config.seed,
         config.worldType == WorldType::LargeBiomes,
         config.worldType == WorldType::Default11,

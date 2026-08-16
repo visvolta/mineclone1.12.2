@@ -13,6 +13,7 @@
 
 #include "world/World.hpp"
 #include "worldgen/TerrainGenerator.hpp"
+#include "worldgen/FlatGeneratorSettings.hpp"
 #include "worldgen/StructureGenerator.hpp"
 #include "worldgen/WorldPopulator.hpp"
 
@@ -52,8 +53,9 @@ std::vector<std::unique_ptr<Chunk>> generatePrivateRegion(
     // A 5x5 terrain halo permits the sixteen population origins surrounding
     // the returned 3x3 to perform their vanilla +8..+23 cross-chunk writes.
     // Flat/debug presets without decoration need only the returned region.
-    const bool needsPopulationHalo = config.worldType != WorldType::Flat &&
-        config.worldType != WorldType::DebugAllBlockStates;
+    const FlatGeneratorSettings flat = FlatGeneratorSettings::parse(config.generatorOptions);
+    const bool needsPopulationHalo = config.worldType != WorldType::DebugAllBlockStates &&
+        (config.worldType != WorldType::Flat || !flat.features.empty());
     const int halo = needsPopulationHalo ? 1 : 0;
     const int farEdge = needsPopulationHalo ? 3 : 2;
     for (int z = originZ - halo; z <= originZ + farEdge; ++z)

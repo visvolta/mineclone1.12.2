@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <filesystem>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -12,6 +13,7 @@
 #include "world/World.hpp"
 #include "worldgen/BiomeProvider.hpp"
 #include "worldgen/JavaRandom.hpp"
+#include "worldgen/StructureTemplate.hpp"
 
 namespace {
 
@@ -125,6 +127,7 @@ struct DecoratorProfile {
     int cactus = 0;
     int waterlily = 0;
     int mushrooms = 0;
+    int bigMushrooms = 0;
     float extraTreeChance = 0.1F;
 };
 
@@ -136,26 +139,33 @@ DecoratorProfile profileFor(int biome) {
         case 130: case 165: case 166: case 167:
             profile.trees = -999; profile.deadBush = biome >= 37 ? 20 : 2;
             profile.reeds = biome >= 37 ? 3 : 50; profile.cactus = biome >= 37 ? 5 : 10;
-            profile.flowers = biome >= 37 ? 0 : 2; break;
+            profile.flowers = biome >= 37 ? 0 : 2;
+            if (biome == 38 || biome == 166) profile.trees = 5;
+            break;
         case 3: case 20: case 34: case 131: case 162:
-            profile.trees = 3; profile.grass = 1; break;
+            profile.trees = (biome == 20 || biome == 34) ? 3 : 0; profile.grass = 1; break;
         case 4: case 18: case 27: case 28: case 29: case 132: case 155: case 156: case 157:
-            profile.trees = biome == 29 ? -999 : 10; profile.grass = 2;
+            profile.trees = (biome == 29 || biome == 157) ? -999 : 10; profile.grass = 2;
             if (biome == 132) { profile.trees = 6; profile.flowers = 100; profile.grass = 1; }
             break;
         case 5: case 19: case 30: case 31: case 32: case 33: case 133: case 158: case 160: case 161:
             profile.trees = 10; profile.grass = (biome == 32 || biome == 33 || biome == 160 || biome == 161) ? 7 : 1;
-            if (profile.grass == 7) profile.deadBush = 1;
+            if (profile.grass == 7) { profile.deadBush = 1; profile.mushrooms = 3; }
+            else profile.mushrooms = 1;
             break;
         case 6: case 134: profile.trees = 2; profile.flowers = 1; profile.grass = 5;
-            profile.deadBush = 1; profile.reeds = 10; profile.waterlily = 4; break;
+            profile.deadBush = 1; profile.reeds = 10; profile.waterlily = 4; profile.mushrooms = 8; break;
         case 12: case 13: case 26: case 140: profile.trees = 0; profile.grass = 1; break;
         case 14: case 15: profile.trees = -100; profile.flowers = -100; profile.grass = -100;
-            profile.mushrooms = 8; break;
+            profile.mushrooms = 1; profile.bigMushrooms = 1; break;
         case 21: case 22: case 23: case 149: case 151:
-            profile.trees = biome == 23 ? 2 : 50; profile.grass = 25; profile.flowers = 4; break;
+            profile.trees = (biome == 23 || biome == 151) ? 2 : 50;
+            profile.grass = 25; profile.flowers = 4; break;
         case 35: case 36: case 163: case 164:
-            profile.trees = 1; profile.flowers = 4; profile.grass = 20; break;
+            if (biome == 163 || biome == 164) {
+                profile.trees = 2; profile.flowers = 2; profile.grass = 5;
+            } else { profile.trees = 1; profile.flowers = 4; profile.grass = 20; }
+            break;
         default: break;
     }
     return profile;
@@ -469,6 +479,88 @@ bool WorldPopulator::generateDungeon(World& world, JavaRandom& random, int x, in
     return true;
 }
 
+bool WorldPopulator::generateSpring(World& world, int x, int y, int z,
+                                    BlockState liquid) const {
+    const auto isStone = [&](int px, int py, int pz) {
+        return static_cast<BlockId>(blockId(world.getBlock(px, py, pz))) == BlockId::Stone;
+    };
+    if (!isStone(x, y + 1, z) || !isStone(x, y - 1, z)) return false;
+    const BlockId current = static_cast<BlockId>(blockId(world.getBlock(x, y, z)));
+    if (current != BlockId::Air && current != BlockId::Stone) return false;
+    int stone = 0;
+    int air = 0;
+    constexpr std::array<std::array<int, 2>, 4> offsets{{{{-1, 0}}, {{1, 0}}, {{0, -1}}, {{0, 1}}}};
+    for (const auto& offset : offsets) {
+        if (isStone(x + offset[0], y, z + offset[1])) ++stone;
+        if (isAir(world, x + offset[0], y, z + offset[1])) ++air;
+    }
+    if (stone == 3 && air == 1) world.setGeneratedBlock(x, y, z, liquid);
+    return true;
+}
+
+bool WorldPopulator::generateFossil(World& world, int chunkX, int chunkZ) const {
+    static constexpr std::array<std::string_view, 8> names{
+        "fossil_spine_01", "fossil_spine_02", "fossil_spine_03", "fossil_spine_04",
+        "fossil_skull_01", "fossil_skull_02", "fossil_skull_03", "fossil_skull_04"};
+    static const std::array<StructureTemplate, 8> fossils = [] {
+        std::array<StructureTemplate, 8> loaded;
+        for (std::size_t index = 0; index < names.size(); ++index) {
+            const std::filesystem::path path = std::filesystem::path(BLOCKCRAFT_ASSET_ROOT) /
+                "assets/minecraft/structures/fossils" / (std::string(names[index]) + ".nbt");
+            loaded[index] = StructureTemplate::load(path.string());
+        }
+        return loaded;
+    }();
+    static const std::array<StructureTemplate, 8> coal = [] {
+        std::array<StructureTemplate, 8> loaded;
+        for (std::size_t index = 0; index < names.size(); ++index) {
+            const std::filesystem::path path = std::filesystem::path(BLOCKCRAFT_ASSET_ROOT) /
+                "assets/minecraft/structures/fossils" / (std::string(names[index]) + "_coal.nbt");
+            loaded[index] = StructureTemplate::load(path.string());
+        }
+        return loaded;
+    }();
+
+    const auto javaIntProduct = [](int left, int right) {
+        return static_cast<std::int32_t>(static_cast<std::uint32_t>(left) * static_cast<std::uint32_t>(right));
+    };
+    const std::int32_t xSquared = javaIntProduct(chunkX, chunkX);
+    const std::int32_t zSquared = javaIntProduct(chunkZ, chunkZ);
+    const std::int32_t xTerm = javaIntProduct(xSquared, 4987142);
+    const std::int32_t xLinear = javaIntProduct(chunkX, 5947611);
+    const std::int64_t chunkSeed = static_cast<std::int64_t>(xTerm) + xLinear +
+        static_cast<std::int64_t>(zSquared) * 4392871LL +
+        static_cast<std::int64_t>(javaIntProduct(chunkZ, 389711));
+    JavaRandom random(static_cast<std::int64_t>(
+        (static_cast<std::uint64_t>(config_.seed) + static_cast<std::uint64_t>(chunkSeed)) ^ 987234911ULL));
+    const int rotation = random.nextInt(4);
+    const int selected = random.nextInt(8);
+    const StructureTemplate& fossil = fossils[static_cast<std::size_t>(selected)];
+    const int width = fossil.rotatedSizeX(rotation);
+    const int depth = fossil.rotatedSizeZ(rotation);
+    const int offsetX = random.nextInt(16 - width);
+    const int offsetZ = random.nextInt(16 - depth);
+    int minimumHeight = 256;
+    const int baseX = chunkX * 16;
+    const int baseZ = chunkZ * 16;
+    // WorldGenFossils 1.12.2 intentionally uses the rotated X size for both
+    // loops; preserve that vanilla quirk rather than substituting depth.
+    for (int x = 0; x < width; ++x)
+        for (int z = 0; z < width; ++z)
+            minimumHeight = std::min(minimumHeight, surfaceY(world, baseX + offsetX + x, baseZ + offsetZ + z));
+    const int y = std::max(minimumHeight - 15 - random.nextInt(10), 10);
+
+    int originX = baseX + offsetX;
+    int originZ = baseZ + offsetZ;
+    if (rotation == 1) originX += fossil.sizeZ() - 1;
+    else if (rotation == 2) { originX += fossil.sizeX() - 1; originZ += fossil.sizeZ() - 1; }
+    else if (rotation == 3) originZ += fossil.sizeX() - 1;
+    fossil.place(world, random, originX, y, originZ, rotation, 0.9F, chunkX, chunkZ);
+    coal[static_cast<std::size_t>(selected)].place(
+        world, random, originX, y, originZ, rotation, 0.1F, chunkX, chunkZ);
+    return true;
+}
+
 void WorldPopulator::generateOre(World& world, JavaRandom& random, int x, int y, int z,
                                  BlockState state, int size) const {
     const float angle = random.nextFloat() * pi;
@@ -651,6 +743,9 @@ void WorldPopulator::decorate(World& world, JavaRandom& random, int chunkX, int 
                         settings_.lapisCenterHeight - settings_.lapisSpread,
                     originZ + random.nextInt(16), block(BlockId::LapisOre), settings_.lapisSize);
     }
+    if (biomeId == 37 || biomeId == 38 || biomeId == 39 || biomeId == 165 ||
+        biomeId == 166 || biomeId == 167)
+        ore(20, settings_.goldSize, 32, 80, block(BlockId::GoldOre));
 
     if (biomeId == 3 || biomeId == 20 || biomeId == 34 || biomeId == 131 || biomeId == 162) {
         for (int count = 3 + random.nextInt(6); count > 0; --count) {
@@ -669,6 +764,11 @@ void WorldPopulator::decorate(World& world, JavaRandom& random, int chunkX, int 
         const int x = originX + random.nextInt(16) + 8;
         const int z = originZ + random.nextInt(16) + 8;
         generateTree(world, random, x, surfaceY(world, x, z), z, biomeId);
+    }
+    for (int attempt = 0; attempt < profile.bigMushrooms; ++attempt) {
+        const int x = originX + random.nextInt(16) + 8;
+        const int z = originZ + random.nextInt(16) + 8;
+        static_cast<void>(generateHugeMushroom(world, random, x, surfaceY(world, x, z), z));
     }
     for (int attempt = 0; attempt < profile.flowers; ++attempt) {
         const int x = originX + random.nextInt(16) + 8;
@@ -743,6 +843,16 @@ void WorldPopulator::decorate(World& world, JavaRandom& random, int chunkX, int 
     };
     reeds(profile.reeds + 10);
 
+    if (random.nextInt(32) == 0) {
+        const int baseX = originX + random.nextInt(16) + 8;
+        const int baseZ = originZ + random.nextInt(16) + 8;
+        const int maximum = surfaceY(world, baseX, baseZ) * 2;
+        if (maximum > 0)
+            plantPatch(world, random, baseX, random.nextInt(maximum), baseZ,
+                       block(BlockId::Pumpkin, static_cast<std::uint8_t>(random.nextInt(4))),
+                       64, 8, 4, false);
+    }
+
     for (int attempt = 0; attempt < profile.cactus; ++attempt) {
         const int baseX = originX + random.nextInt(16) + 8;
         const int baseZ = originZ + random.nextInt(16) + 8;
@@ -763,15 +873,25 @@ void WorldPopulator::decorate(World& world, JavaRandom& random, int chunkX, int 
                 world.setGeneratedBlock(x, y + dy, z, block(BlockId::Cactus));
         }
     }
-    if (random.nextInt(32) == 0) {
-        const int baseX = originX + random.nextInt(16) + 8;
-        const int baseZ = originZ + random.nextInt(16) + 8;
-        const int maximum = surfaceY(world, baseX, baseZ) * 2;
-        if (maximum > 0)
-            plantPatch(world, random, baseX, random.nextInt(maximum), baseZ,
-                       block(BlockId::Pumpkin, static_cast<std::uint8_t>(random.nextInt(4))),
-                       64, 8, 4, false);
+    // BiomeDecorator#genDecorations ends with these exact spring attempts.
+    // The nested height draws are significant because they also advance the
+    // population RNG when no spring can be placed.
+    for (int attempt = 0; attempt < 50; ++attempt) {
+        const int x = originX + random.nextInt(16) + 8;
+        const int z = originZ + random.nextInt(16) + 8;
+        const int upper = random.nextInt(248) + 8;
+        const int y = random.nextInt(upper);
+        generateSpring(world, x, y, z, block(BlockId::FlowingWater));
     }
+    for (int attempt = 0; attempt < 20; ++attempt) {
+        const int x = originX + random.nextInt(16) + 8;
+        const int z = originZ + random.nextInt(16) + 8;
+        const int y = random.nextInt(random.nextInt(random.nextInt(240) + 8) + 8);
+        generateSpring(world, x, y, z, block(BlockId::FlowingLava));
+    }
+
+    if ((biomeId == 6 || biomeId == 134) && random.nextInt(64) == 0)
+        generateFossil(world, chunkX, chunkZ);
 
     // Vanilla's final freeze/snow pass covers the population area's +8 square.
     for (int dz = 0; dz < 16; ++dz) {
@@ -793,9 +913,7 @@ void WorldPopulator::decorate(World& world, JavaRandom& random, int chunkX, int 
 }
 
 void WorldPopulator::populate(World& world, int chunkX, int chunkZ) const {
-    // Flat generation owns a separate feature map (village, decoration,
-    // lakes, dungeons, and so on). The default preset has no decoration pass.
-    if (config_.worldType == WorldType::DebugAllBlockStates || config_.worldType == WorldType::Flat) return;
+    if (config_.worldType == WorldType::DebugAllBlockStates) return;
     JavaRandom random(wrappedPopulationSeed(config_.seed, chunkX, chunkZ));
     const int biomeX = chunkX * chunkSize + 16;
     const int biomeZ = chunkZ * chunkSize + 16;
@@ -804,6 +922,30 @@ void WorldPopulator::populate(World& world, int chunkX, int chunkZ) const {
 
     const int originX = chunkX * chunkSize;
     const int originZ = chunkZ * chunkSize;
+    if (config_.worldType == WorldType::Flat) {
+        // ChunkGeneratorFlat uses feature presence, not the customized-world
+        // booleans/chances, and suppresses both lake types when a village was
+        // generated. Structure generation reports that condition separately;
+        // until its piece graph is shared here, preserve the exact non-village
+        // feature order and random draws.
+        if (flat_.waterLake && random.nextInt(4) == 0)
+            generateLake(world, random, originX + random.nextInt(16) + 8, random.nextInt(256),
+                         originZ + random.nextInt(16) + 8, block(BlockId::Water));
+        if (flat_.lavaLake && random.nextInt(8) == 0) {
+            const int x = originX + random.nextInt(16) + 8;
+            const int y = random.nextInt(random.nextInt(248) + 8);
+            const int z = originZ + random.nextInt(16) + 8;
+            if (y < flat_.seaLevel || random.nextInt(10) == 0)
+                generateLake(world, random, x, y, z, block(BlockId::Lava));
+        }
+        if (flat_.dungeons) {
+            for (int attempt = 0; attempt < 8; ++attempt)
+                generateDungeon(world, random, originX + random.nextInt(16) + 8,
+                                random.nextInt(256), originZ + random.nextInt(16) + 8);
+        }
+        if (flat_.decoration) decorate(world, random, chunkX, chunkZ, biome);
+        return;
+    }
     const bool desert = biome == 2 || biome == 17;
     if (settings_.useWaterLakes && !desert && random.nextInt(settings_.waterLakeChance) == 0) {
         generateLake(world, random, originX + random.nextInt(16) + 8, random.nextInt(256),

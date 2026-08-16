@@ -10,6 +10,12 @@ typedef struct CbColorNoise {
     PerlinNoise grass;
 } CbColorNoise;
 
+typedef struct CbMesaNoise {
+    PerlinNoise pillar[4];
+    PerlinNoise roof;
+    PerlinNoise band;
+} CbMesaNoise;
+
 CbGeneratorHandle cbCreateGenerator(int64_t seed, int largeBiomes, int default11, int fixedBiome)
 {
     Generator* generator = (Generator*)calloc(1, sizeof(Generator));
@@ -150,4 +156,46 @@ double cbSampleTemperatureNoise(CbColorNoiseHandle handle, double x, double z)
 double cbSampleGrassColorNoise(CbColorNoiseHandle handle, double x, double z)
 {
     return sampleSimplex2D(&((CbColorNoise*)handle)->grass, x, z);
+}
+
+CbMesaNoiseHandle cbCreateMesaNoise(int64_t seedValue)
+{
+    CbMesaNoise* noise = (CbMesaNoise*)calloc(1, sizeof(CbMesaNoise));
+    uint64_t seed;
+    int i;
+    if (noise == NULL) return NULL;
+    setSeed(&seed, (uint64_t)seedValue);
+    perlinInit(&noise->band, &seed);
+    setSeed(&seed, (uint64_t)seedValue);
+    for (i = 0; i < 4; ++i) perlinInit(&noise->pillar[i], &seed);
+    perlinInit(&noise->roof, &seed);
+    return noise;
+}
+
+void cbDestroyMesaNoise(CbMesaNoiseHandle handle)
+{
+    free(handle);
+}
+
+double cbSampleMesaPillarNoise(CbMesaNoiseHandle handle, double x, double z)
+{
+    CbMesaNoise* noise = (CbMesaNoise*)handle;
+    double value = 0.0;
+    double frequency = 1.0;
+    int i;
+    for (i = 0; i < 4; ++i) {
+        value += sampleSimplex2D(&noise->pillar[i], x * frequency, z * frequency) / frequency;
+        frequency *= 0.5;
+    }
+    return value;
+}
+
+double cbSampleMesaRoofNoise(CbMesaNoiseHandle handle, double x, double z)
+{
+    return sampleSimplex2D(&((CbMesaNoise*)handle)->roof, x, z);
+}
+
+double cbSampleMesaBandOffsetNoise(CbMesaNoiseHandle handle, double x, double z)
+{
+    return sampleSimplex2D(&((CbMesaNoise*)handle)->band, x, z);
 }

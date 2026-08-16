@@ -4,6 +4,7 @@
 
 #include "blocks/BlockState.hpp"
 #include "worldgen/ChunkGeneratorSettings.hpp"
+#include "worldgen/FlatGeneratorSettings.hpp"
 #include "worldgen/WorldConfig.hpp"
 
 class JavaRandom;
@@ -15,7 +16,8 @@ class World;
 class WorldPopulator {
 public:
     explicit WorldPopulator(const WorldConfig& config)
-        : config_(config), settings_(ChunkGeneratorSettings::fromConfig(config)) {}
+        : config_(config), settings_(ChunkGeneratorSettings::fromConfig(config)),
+          flat_(FlatGeneratorSettings::parse(config.generatorOptions)) {}
 
     void populate(World& world, int chunkX, int chunkZ) const;
 
@@ -28,7 +30,10 @@ private:
     bool generateLake(World& world, JavaRandom& random, int x, int y, int z,
                       BlockState liquid) const;
     bool generateDungeon(World& world, JavaRandom& random, int x, int y, int z) const;
+    bool generateSpring(World& world, int x, int y, int z, BlockState liquid) const;
+    bool generateFossil(World& world, int chunkX, int chunkZ) const;
 
     WorldConfig config_;
     ChunkGeneratorSettings settings_;
+    FlatGeneratorSettings flat_;
 };
