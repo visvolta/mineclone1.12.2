@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(Blockcraft VERSION 0.8.0 LANGUAGES C CXX)
+project(Blockcraft VERSION 0.9.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -279,6 +279,26 @@ if(BUILD_TESTING)
         target_compile_options(blockcraft_tests PRIVATE -UNDEBUG)
     endif()
     add_test(NAME blockcraft_core COMMAND blockcraft_tests)
+
+    add_executable(blockcraft_rendering_parity_tests
+        tests/RenderingParityTests.cpp
+        src/blocks/BlockRegistry.cpp
+        src/core/Json.cpp
+        src/rendering/TextureAtlasData.cpp
+        src/rendering/ModelLoader.cpp
+        src/rendering/BlockStateModelMap.cpp
+        src/rendering/ImageLoader.cpp
+    )
+    target_include_directories(blockcraft_rendering_parity_tests PRIVATE src ${stb_SOURCE_DIR})
+    target_compile_definitions(blockcraft_rendering_parity_tests PRIVATE
+        BLOCKCRAFT_ASSET_ROOT="${BLOCKCRAFT_ASSET_ROOT}")
+    target_link_libraries(blockcraft_rendering_parity_tests PRIVATE glm::glm)
+    if(MSVC)
+        target_compile_options(blockcraft_rendering_parity_tests PRIVATE /W4 /permissive- /UNDEBUG)
+    else()
+        target_compile_options(blockcraft_rendering_parity_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
+    endif()
+    add_test(NAME blockcraft_rendering_parity COMMAND blockcraft_rendering_parity_tests)
 endif()
 
 set_property(DIRECTORY PROPERTY VS_STARTUP_PROJECT blockcraft)

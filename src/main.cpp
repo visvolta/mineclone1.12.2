@@ -199,7 +199,7 @@ int main() {
         WorldRenderer worldRenderer(world, atlas, blockRenderResources, chunkStreamer.workers());
         Environment environment(config);
         EnvironmentRenderer environmentRenderer(environment);
-        DebugRenderer debugRenderer;
+        DebugRenderer debugRenderer(blockRenderResources);
         GameHud gameHud(window, BLOCKCRAFT_ASSET_ROOT, atlas);
         Player player({0.5, spawnHeight(world, 0, 0), 0.5});
         BlockInteraction interaction;

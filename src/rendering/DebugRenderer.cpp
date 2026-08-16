@@ -5,10 +5,18 @@
 #include <filesystem>
 #include <stdexcept>
 #include <string>
+#include <vector>
+
+#include <glm/vec2.hpp>
+#include <glm/vec3.hpp>
 
 #include <stb_image.h>
 
 #include "blocks/BlockShape.hpp"
+#include "rendering/BlockRenderPath.hpp"
+#include "rendering/BlockRenderResources.hpp"
+#include "rendering/BlockStateModelMap.hpp"
+#include "rendering/ModelLoader.hpp"
 #include "world/World.hpp"
 
 namespace {
@@ -24,19 +32,22 @@ constexpr std::string_view overlayVertex = R"glsl(
 #version 330 core
 layout (location = 0) in vec3 position;
 layout (location = 1) in vec2 textureUv;
+layout (location = 2) in float vertexShade;
 out vec2 uv;
+out float shade;
 uniform mat4 transform;
-void main() { uv = textureUv; gl_Position = transform * vec4(position, 1.0); }
+void main() { uv = textureUv; shade = vertexShade; gl_Position = transform * vec4(position, 1.0); }
 )glsl";
 
 constexpr std::string_view overlayFragment = R"glsl(
 #version 330 core
 in vec2 uv;
+in float shade;
 out vec4 fragmentColor;
 uniform sampler2D damageTexture;
 void main() {
     vec4 sampled = texture(damageTexture, uv);
-    fragmentColor = vec4(sampled.rgb, sampled.a * 0.72);
+    fragmentColor = vec4(sampled.rgb * shade, sampled.a * 0.72);
     if (fragmentColor.a < 0.01) discard;
 }
 )glsl";
@@ -71,8 +82,8 @@ void main() {
 
 } // namespace
 
-DebugRenderer::DebugRenderer()
-    : worldShader_(worldVertex, blackFragment), overlayShader_(overlayVertex, overlayFragment),
+DebugRenderer::DebugRenderer(const BlockRenderResources& resources)
+    : resources_(resources), worldShader_(worldVertex, blackFragment), overlayShader_(overlayVertex, overlayFragment),
       screenShader_(screenVertex, texturedFragment) {
     glGenVertexArrays(1, &worldVao_);
     glGenBuffers(1, &worldVbo_);
@@ -86,11 +97,13 @@ DebugRenderer::DebugRenderer()
     glGenBuffers(1, &overlayVbo_);
     glBindVertexArray(overlayVao_);
     glBindBuffer(GL_ARRAY_BUFFER, overlayVbo_);
-    glBufferData(GL_ARRAY_BUFFER, 36 * 5 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), nullptr);
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), reinterpret_cast<void*>(3 * sizeof(float)));
+    glBufferData(GL_ARRAY_BUFFER, 36 * 6 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), nullptr);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 6 * sizeof(float), reinterpret_cast<void*>(3 * sizeof(float)));
+    glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, 6 * sizeof(float), reinterpret_cast<void*>(5 * sizeof(float)));
     glEnableVertexAttribArray(0);
     glEnableVertexAttribArray(1);
+    glEnableVertexAttribArray(2);
 
     glGenVertexArrays(1, &screenVao_);
     glGenBuffers(1, &screenVbo_);
@@ -190,25 +203,81 @@ void DebugRenderer::renderBreakOverlay(const World& world, const std::optional<R
                                        float progress, const glm::mat4& view,
                                        const glm::mat4& projection) {
     if (!hit || progress <= 0.0F) return;
-    const auto bounds = BlockShapes::selectionBounds(world, hit->state, hit->block.x, hit->block.y, hit->block.z);
-    if (!bounds) return;
-    const int stage = std::clamp(static_cast<int>(progress * 10.0F), 0, 9);
-    constexpr float expand = 0.001F;
-    const float x0 = static_cast<float>(hit->block.x + bounds->minX) - expand;
-    const float y0 = static_cast<float>(hit->block.y + bounds->minY) - expand;
-    const float z0 = static_cast<float>(hit->block.z + bounds->minZ) - expand;
-    const float x1 = static_cast<float>(hit->block.x + bounds->maxX) + expand;
-    const float y1 = static_cast<float>(hit->block.y + bounds->maxY) + expand;
-    const float z1 = static_cast<float>(hit->block.z + bounds->maxZ) + expand;
-    const std::array<float, 180> vertices = {{
-        x0,y0,z0,0,1, x1,y0,z0,1,1, x1,y1,z0,1,0, x0,y0,z0,0,1, x1,y1,z0,1,0, x0,y1,z0,0,0,
-        x1,y0,z1,0,1, x0,y0,z1,1,1, x0,y1,z1,1,0, x1,y0,z1,0,1, x0,y1,z1,1,0, x1,y1,z1,0,0,
-        x0,y0,z1,0,1, x0,y0,z0,1,1, x0,y1,z0,1,0, x0,y0,z1,0,1, x0,y1,z0,1,0, x0,y1,z1,0,0,
-        x1,y0,z0,0,1, x1,y0,z1,1,1, x1,y1,z1,1,0, x1,y0,z0,0,1, x1,y1,z1,1,0, x1,y1,z0,0,0,
-        x0,y1,z0,0,1, x1,y1,z0,1,1, x1,y1,z1,1,0, x0,y1,z0,0,1, x1,y1,z1,1,0, x0,y1,z1,0,0,
-        x0,y0,z1,0,1, x1,y0,z1,1,1, x1,y0,z0,1,0, x0,y0,z1,0,1, x1,y0,z0,1,0, x0,y0,z0,0,0
-    }};
+    if (blockRenderPath(hit->state) != BlockRenderPath::JsonModel) return;
 
+    const auto lookup = [&](int dx, int dy, int dz) {
+        return world.getBlock(hit->block.x + dx, hit->block.y + dy, hit->block.z + dz);
+    };
+    const BlockModelState modelState = resolveBlockModelState(hit->state, lookup);
+    if (!resources_.models().hasBlockState(modelState.resourceName)) return;
+    const auto models = resources_.models().select(
+        modelState, blockModelPositionRandom(hit->block.x, hit->block.y, hit->block.z));
+    if (models.empty()) return;
+
+    const auto faceNormal = [](Face face) -> glm::vec3 {
+        switch (face) {
+            case Face::Down: return {0.0F, -1.0F, 0.0F};
+            case Face::Up: return {0.0F, 1.0F, 0.0F};
+            case Face::North: return {0.0F, 0.0F, -1.0F};
+            case Face::South: return {0.0F, 0.0F, 1.0F};
+            case Face::West: return {-1.0F, 0.0F, 0.0F};
+            case Face::East: return {1.0F, 0.0F, 0.0F};
+        }
+        return {};
+    };
+    const auto crackUv = [](Face face, const glm::vec3& p) -> glm::vec2 {
+        switch (face) {
+            case Face::Down: return {p.x, 1.0F - p.z};
+            case Face::Up: return {p.x, p.z};
+            case Face::North: return {1.0F - p.x, 1.0F - p.y};
+            case Face::South: return {p.x, 1.0F - p.y};
+            case Face::West: return {p.z, 1.0F - p.y};
+            case Face::East: return {1.0F - p.z, 1.0F - p.y};
+        }
+        return {};
+    };
+    const auto occluded = [&](const BakedModelQuad& quad) {
+        if (!quad.cullFace) return false;
+        const glm::vec3 n = faceNormal(*quad.cullFace);
+        const BlockState neighbor = world.getBlock(
+            hit->block.x + static_cast<int>(n.x),
+            hit->block.y + static_cast<int>(n.y),
+            hit->block.z + static_cast<int>(n.z));
+        if (blockId(neighbor) == 0) return false;
+        const auto currentId = static_cast<BlockId>(blockId(hit->state));
+        const auto neighborId = static_cast<BlockId>(blockId(neighbor));
+        if (currentId == BlockId::Glass && neighborId == BlockId::Glass) return true;
+        if (currentId == BlockId::StainedGlass && neighborId == BlockId::StainedGlass &&
+            blockMetadata(hit->state) == blockMetadata(neighbor)) return true;
+        if (currentId == BlockId::Ice && neighborId == BlockId::Ice) return true;
+        return BlockRegistry::get(neighbor).opaque;
+    };
+
+    std::vector<float> vertices;
+    for (const BakedBlockModel* model : models) {
+        if (model == nullptr) continue;
+        for (const BakedModelQuad& quad : model->quads) {
+            if (occluded(quad)) continue;
+            const glm::vec3 normal = faceNormal(quad.face);
+            constexpr float expand = 0.001F;
+            std::array<glm::vec3, 4> p{};
+            std::array<glm::vec2, 4> uv{};
+            for (std::size_t i = 0; i < 4; ++i) {
+                p[i] = glm::vec3(hit->block) + quad.positions[i] + normal * expand;
+                uv[i] = crackUv(quad.face, quad.positions[i]);
+            }
+            constexpr std::array<float, 6> faceShade = {0.5F, 1.0F, 0.8F, 0.8F, 0.6F, 0.6F};
+            const float shade = quad.shade ? faceShade[static_cast<std::size_t>(quad.face)] : 1.0F;
+            constexpr std::array<std::size_t, 6> indices = {0, 1, 2, 0, 2, 3};
+            for (std::size_t index : indices) {
+                vertices.insert(vertices.end(), {p[index].x, p[index].y, p[index].z,
+                                                 uv[index].x, uv[index].y, shade});
+            }
+        }
+    }
+    if (vertices.empty()) return;
+
+    const int stage = std::clamp(static_cast<int>(progress * 10.0F), 0, 9);
     overlayShader_.use();
     overlayShader_.setMat4("transform", projection * view);
     overlayShader_.setInt("damageTexture", 0);
@@ -216,13 +285,14 @@ void DebugRenderer::renderBreakOverlay(const World& world, const std::optional<R
     glBindTexture(GL_TEXTURE_2D, destroyTextures_[static_cast<std::size_t>(stage)]);
     glBindVertexArray(overlayVao_);
     glBindBuffer(GL_ARRAY_BUFFER, overlayVbo_);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices.data());
+    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(vertices.size() * sizeof(float)),
+                 vertices.data(), GL_DYNAMIC_DRAW);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glEnable(GL_POLYGON_OFFSET_FILL);
     glPolygonOffset(-1.0F, -10.0F);
     glDepthMask(GL_FALSE);
-    glDrawArrays(GL_TRIANGLES, 0, 36);
+    glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertices.size() / 6));
     glDepthMask(GL_TRUE);
     glDisable(GL_POLYGON_OFFSET_FILL);
     glDisable(GL_BLEND);

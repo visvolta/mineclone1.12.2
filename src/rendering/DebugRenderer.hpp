@@ -9,11 +9,12 @@
 #include "rendering/Shader.hpp"
 #include "world/Raycast.hpp"
 
+class BlockRenderResources;
 class World;
 
 class DebugRenderer {
 public:
-    DebugRenderer();
+    explicit DebugRenderer(const BlockRenderResources& resources);
     ~DebugRenderer();
     DebugRenderer(const DebugRenderer&) = delete;
     DebugRenderer& operator=(const DebugRenderer&) = delete;
@@ -25,6 +26,7 @@ public:
     void renderCrosshair(int framebufferWidth, int framebufferHeight);
 
 private:
+    const BlockRenderResources& resources_;
     Shader worldShader_;
     Shader overlayShader_;
     Shader screenShader_;

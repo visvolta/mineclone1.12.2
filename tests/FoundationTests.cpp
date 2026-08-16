@@ -1,3 +1,4 @@
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <iostream>
@@ -8,6 +9,7 @@
 #include "blocks/BlockShape.hpp"
 #include "client/ScaledResolution.hpp"
 #include "player/Player.hpp"
+#include "rendering/BlockRenderPath.hpp"
 #include "world/Raycast.hpp"
 #include "world/World.hpp"
 
@@ -123,6 +125,24 @@ void testPlayerUsesBlockCollisionShapes() {
     assert(!throughTorch.intersectsBlock(world, {1, 0, 0}));
 }
 
+void testIntentionalRenderPathTable() {
+    std::array<int, 5> counts{};
+    int registered = 0;
+    for (std::uint16_t numericId = 0; numericId < 256; ++numericId) {
+        if (!BlockRegistry::isRegisteredId(numericId)) continue;
+        ++registered;
+        const BlockRenderPath path = blockRenderPath(static_cast<BlockId>(numericId));
+        ++counts[static_cast<std::size_t>(path)];
+        assert(!blockRenderPathName(path).empty());
+    }
+    assert(registered == static_cast<int>(BlockRegistry::registeredCount()));
+    assert(counts[static_cast<std::size_t>(BlockRenderPath::JsonModel)] == 219);
+    assert(counts[static_cast<std::size_t>(BlockRenderPath::CustomFluid)] == 4);
+    assert(counts[static_cast<std::size_t>(BlockRenderPath::IntentionallyInvisible)] == 3);
+    assert(counts[static_cast<std::size_t>(BlockRenderPath::StaticCustomRenderer)] == 0);
+    assert(counts[static_cast<std::size_t>(BlockRenderPath::BlockEntityRenderer)] == 28);
+}
+
 } // namespace
 
 int main() {
@@ -132,6 +152,7 @@ int main() {
     testDoorTrapdoorAndCactusShapes();
     testShapeAwareRaycast();
     testPlayerUsesBlockCollisionShapes();
+    testIntentionalRenderPathTable();
     std::cout << "All asset-free Blockcraft foundation tests passed.\n";
     return 0;
 }
