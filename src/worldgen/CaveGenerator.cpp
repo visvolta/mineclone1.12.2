@@ -54,7 +54,8 @@ bool replaceable(BlockState state, BlockState above) {
             return true;
         case BlockId::Sand:
         case BlockId::Gravel:
-            return static_cast<BlockId>(blockId(above)) != BlockId::Water;
+            return static_cast<BlockId>(blockId(above)) != BlockId::Water &&
+                static_cast<BlockId>(blockId(above)) != BlockId::FlowingWater;
         default:
             return false;
     }
@@ -135,8 +136,10 @@ void addTunnel(World& world, std::int64_t seed, int targetX, int targetZ,
         for (int localX = minX; !touchesWater && localX < maxX; ++localX) {
             for (int localZ = minZ; !touchesWater && localZ < maxZ; ++localZ) {
                 for (int scanY = maxY + 1; scanY >= minY - 1; --scanY) {
+                    const BlockId scan = static_cast<BlockId>(blockId(
+                        world.getBlock(targetX * 16 + localX, scanY, targetZ * 16 + localZ)));
                     if (scanY >= 0 && scanY < 256 &&
-                        static_cast<BlockId>(blockId(world.getBlock(targetX * 16 + localX, scanY, targetZ * 16 + localZ))) == BlockId::Water) {
+                        (scan == BlockId::Water || scan == BlockId::FlowingWater)) {
                         touchesWater = true;
                         break;
                     }
@@ -248,8 +251,10 @@ void addRavine(World& world, std::int64_t seed, int targetX, int targetZ,
         for (int localX = minX; !touchesWater && localX < maxX; ++localX) {
             for (int localZ = minZ; !touchesWater && localZ < maxZ; ++localZ) {
                 for (int scanY = maxY + 1; scanY >= minY - 1; --scanY) {
+                    const BlockId scan = static_cast<BlockId>(blockId(
+                        world.getBlock(targetX * 16 + localX, scanY, targetZ * 16 + localZ)));
                     if (scanY >= 0 && scanY < 256 &&
-                        static_cast<BlockId>(blockId(world.getBlock(targetX * 16 + localX, scanY, targetZ * 16 + localZ))) == BlockId::Water) {
+                        (scan == BlockId::Water || scan == BlockId::FlowingWater)) {
                         touchesWater = true;
                         break;
                     }

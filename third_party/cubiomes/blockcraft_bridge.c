@@ -62,10 +62,50 @@ double cbSampleSurfaceNoise(CbSurfaceNoiseHandle handle, int x, int y, int z)
     return sampleSurfaceNoise((SurfaceNoise*)handle, x, y, z);
 }
 
-double cbSampleDepthNoise(CbSurfaceNoiseHandle handle, double x, double y, double z)
+double cbSampleTerrainNoise(CbSurfaceNoiseHandle handle, int x, int y, int z,
+                            double coordinateScale, double heightScale,
+                            double lowerLimitScale, double upperLimitScale,
+                            double mainNoiseScaleX, double mainNoiseScaleY,
+                            double mainNoiseScaleZ)
 {
     SurfaceNoise* noise = (SurfaceNoise*)handle;
-    return sampleOctaveAmp(&noise->octdepth, x, y, z, 1.0, 0.0, 1);
+    double minimum = 0.0;
+    double maximum = 0.0;
+    double main = 0.0;
+    double persistence = 1.0;
+    double contribution = 1.0;
+    int octave;
+
+    for (octave = 0; octave < 16; ++octave) {
+        double dx = maintainPrecision(x * coordinateScale * persistence);
+        double dy = maintainPrecision(y * heightScale * persistence);
+        double dz = maintainPrecision(z * coordinateScale * persistence);
+        double sy = heightScale * persistence;
+        double ty = y * sy;
+        minimum += samplePerlin(&noise->octmin.octaves[octave], dx, dy, dz, sy, ty) * contribution;
+        maximum += samplePerlin(&noise->octmax.octaves[octave], dx, dy, dz, sy, ty) * contribution;
+
+        if (octave < 8) {
+            dx = maintainPrecision(x * coordinateScale / mainNoiseScaleX * persistence);
+            dy = maintainPrecision(y * heightScale / mainNoiseScaleY * persistence);
+            dz = maintainPrecision(z * coordinateScale / mainNoiseScaleZ * persistence);
+            sy = heightScale / mainNoiseScaleY * persistence;
+            ty = y * sy;
+            main += samplePerlin(&noise->octmain.octaves[octave], dx, dy, dz, sy, ty) * contribution;
+        }
+        persistence *= 0.5;
+        contribution *= 2.0;
+    }
+
+    return clampedLerp((main / 10.0 + 1.0) / 2.0,
+                       minimum / lowerLimitScale,
+                       maximum / upperLimitScale);
+}
+
+double cbSampleDepthNoise(CbSurfaceNoiseHandle handle, double x, double z)
+{
+    SurfaceNoise* noise = (SurfaceNoise*)handle;
+    return sampleOctaveAmp(&noise->octdepth, x, 10.0, z, 1.0, 0.0, 1);
 }
 
 double cbSampleSurfaceOctaves(CbSurfaceNoiseHandle handle, double x, double z)

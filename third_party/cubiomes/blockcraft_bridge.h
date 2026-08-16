@@ -19,7 +19,12 @@ int cbGenerateBiomes(CbGeneratorHandle handle, int scale, int x, int z,
 CbSurfaceNoiseHandle cbCreateSurfaceNoise(int64_t seed);
 void cbDestroySurfaceNoise(CbSurfaceNoiseHandle handle);
 double cbSampleSurfaceNoise(CbSurfaceNoiseHandle handle, int x, int y, int z);
-double cbSampleDepthNoise(CbSurfaceNoiseHandle handle, double x, double y, double z);
+double cbSampleTerrainNoise(CbSurfaceNoiseHandle handle, int x, int y, int z,
+                            double coordinateScale, double heightScale,
+                            double lowerLimitScale, double upperLimitScale,
+                            double mainNoiseScaleX, double mainNoiseScaleY,
+                            double mainNoiseScaleZ);
+double cbSampleDepthNoise(CbSurfaceNoiseHandle handle, double x, double z);
 double cbSampleSurfaceOctaves(CbSurfaceNoiseHandle handle, double x, double z);
 
 CbColorNoiseHandle cbCreateColorNoise(void);

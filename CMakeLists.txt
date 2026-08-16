@@ -140,6 +140,7 @@ endif()
 set(BLOCKCRAFT_CORE_SOURCES
     src/core/Json.cpp
     src/core/ThreadPool.cpp
+    src/worldgen/ChunkGeneratorSettings.cpp
     src/environment/Environment.cpp
     src/blocks/BlockRegistry.cpp
     src/lighting/LightSolver.cpp

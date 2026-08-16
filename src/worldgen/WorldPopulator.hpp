@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "blocks/BlockState.hpp"
+#include "worldgen/ChunkGeneratorSettings.hpp"
 #include "worldgen/WorldConfig.hpp"
 
 class JavaRandom;
@@ -13,7 +14,8 @@ class World;
 // ChunkGeneratorOverworld#populate in Java Edition 1.12.2.
 class WorldPopulator {
 public:
-    explicit WorldPopulator(const WorldConfig& config) : config_(config) {}
+    explicit WorldPopulator(const WorldConfig& config)
+        : config_(config), settings_(ChunkGeneratorSettings::fromConfig(config)) {}
 
     void populate(World& world, int chunkX, int chunkZ) const;
 
@@ -22,10 +24,11 @@ private:
     void generateOre(World& world, JavaRandom& random, int x, int y, int z,
                      BlockState state, int size) const;
     void generateTree(World& world, JavaRandom& random, int x, int y, int z,
-                      int biomeId) const;
+                      int biomeId, int forcedSpecies = -1) const;
     bool generateLake(World& world, JavaRandom& random, int x, int y, int z,
                       BlockState liquid) const;
     bool generateDungeon(World& world, JavaRandom& random, int x, int y, int z) const;
 
     WorldConfig config_;
+    ChunkGeneratorSettings settings_;
 };

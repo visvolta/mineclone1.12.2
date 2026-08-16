@@ -5,6 +5,7 @@
 #include <utility>
 #include <vector>
 
+#include "worldgen/ChunkGeneratorSettings.hpp"
 #include "worldgen/WorldConfig.hpp"
 
 class BiomeProvider;
@@ -30,6 +31,7 @@ private:
     void place(World& world, Type type, int chunkX, int chunkZ) const;
 
     WorldConfig config_;
+    ChunkGeneratorSettings settings_;
     std::unique_ptr<BiomeProvider> biomes_;
     std::vector<std::pair<int, int>> strongholds_;
 };

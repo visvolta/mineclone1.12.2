@@ -23,6 +23,7 @@
 #include "world/World.hpp"
 #include "worldgen/JavaRandom.hpp"
 #include "worldgen/BiomeProvider.hpp"
+#include "worldgen/ChunkGeneratorSettings.hpp"
 #include "worldgen/ChunkStreamer.hpp"
 #include "worldgen/StructureGenerator.hpp"
 #include "worldgen/TerrainGenerator.hpp"
@@ -35,6 +36,10 @@ constexpr BlockState block(BlockId id, std::uint8_t metadata = 0) {
 }
 
 std::size_t quadCount(const MeshData& mesh) { return mesh.indices.size() / 6; }
+
+std::uint64_t fnvByte(std::uint64_t hash, std::uint8_t value) {
+    return (hash ^ value) * 1099511628211ULL;
+}
 
 const BlockRenderResources& renderResources() {
     static const BlockRenderResources resources(BLOCKCRAFT_ASSET_ROOT);
@@ -449,6 +454,23 @@ void testReferenceTerrainFixture() {
     const std::vector<std::int32_t> biomes = provider.getBiomes(-32, 0, 16, 16);
     for (int index = 0; index < 64; ++index) assert(biomes[static_cast<std::size_t>(index)] == 29);
 
+    // Full 16x16 biome arrays exported from an unmodified 1.12.2 server with
+    // tests/VanillaChunkHash.py. This catches errors that sparse point samples
+    // miss, including x/z ordering and negative-region floor division.
+    struct BiomeChunkFixture { int x; int z; std::uint64_t hash; };
+    constexpr std::array biomeFixtures{
+        BiomeChunkFixture{-2, 0, 0xa941f45d9c0d5bf7ULL},
+        BiomeChunkFixture{-3, 0, 0x9dfb932bec59e825ULL},
+        BiomeChunkFixture{-2, -1, 0x4e52cc3e6f0008a7ULL}
+    };
+    for (const BiomeChunkFixture& fixture : biomeFixtures) {
+        const auto values = provider.getBiomes(fixture.x * 16, fixture.z * 16, 16, 16);
+        std::uint64_t hash = 14695981039346656037ULL;
+        for (const std::int32_t value : values)
+            hash = fnvByte(hash, static_cast<std::uint8_t>(value));
+        assert(hash == fixture.hash);
+    }
+
     World world;
     TerrainGenerator generator(config);
     generator.generateChunk(world, -2, 0);
@@ -480,6 +502,25 @@ void testReferenceStructureSeeds() {
 void testWorldTypesAndOptions() {
     assert(generatorOptionInt(R"({"fixedBiome":4})", "fixedBiome", -1) == 4);
     assert(generatorOptionBool(R"({"useCaves":false})", "useCaves", true) == false);
+
+    WorldConfig optionConfig;
+    optionConfig.worldType = WorldType::Customized;
+    optionConfig.generatorOptions = R"({
+        "coordinateScale":341.25,"seaLevel":91,"useCaves":false,
+        "useMansions":false,"diamondCount":7,"diamondMinHeight":12,
+        "diamondMaxHeight":42,"lapisCenterHeight":30,"lapisSpread":9
+    })";
+    const ChunkGeneratorSettings settings = ChunkGeneratorSettings::fromConfig(optionConfig);
+    assert(settings.coordinateScale == 341.25F);
+    assert(settings.seaLevel == 91);
+    assert(!settings.useCaves && !settings.useMansions);
+    assert(settings.diamondCount == 7);
+    assert(settings.diamondMinHeight == 12 && settings.diamondMaxHeight == 42);
+    assert(settings.lapisCenterHeight == 30 && settings.lapisSpread == 9);
+    const ChunkGeneratorSettings defaults = ChunkGeneratorSettings::fromConfig(WorldConfig{});
+    assert(defaults.coordinateScale == 684.412F);
+    assert(defaults.dirtSize == 33 && defaults.coalCount == 20);
+    assert(defaults.useStrongholds && defaults.useVillages && defaults.useMineShafts);
 
     WorldConfig flat;
     flat.seed = 1;

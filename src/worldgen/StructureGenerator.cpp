@@ -136,7 +136,8 @@ void addLootChest(World& world, int x, int y, int z, std::string_view table,
 } // namespace
 
 StructureGenerator::StructureGenerator(const WorldConfig& config)
-    : config_(config), biomes_(std::make_unique<BiomeProvider>(config)) {
+    : config_(config), settings_(ChunkGeneratorSettings::fromConfig(config)),
+      biomes_(std::make_unique<BiomeProvider>(config)) {
     JavaRandom random(config.seed);
     double angle = random.nextDouble() * pi * 2.0;
     int ring = 0;
@@ -183,25 +184,31 @@ StructureGenerator::~StructureGenerator() = default;
 
 bool StructureGenerator::startType(int chunkX, int chunkZ, Type& type) const {
     const int biome = biomes_->getBiomes(chunkX * 16 + 8, chunkZ * 16 + 8, 1, 1).front();
-    if (spacingCandidate(config_.seed, chunkX, chunkZ, 80, 20, 10387319, true) &&
+    if (settings_.useMansions &&
+        spacingCandidate(config_.seed, chunkX, chunkZ, 80, 20, 10387319, true) &&
         (biome == 29 || biome == 157)) { type = Type::Mansion; return true; }
-    if (spacingCandidate(config_.seed, chunkX, chunkZ, 32, 5, 10387313, true) && biome == 24) {
+    if (settings_.useMonuments &&
+        spacingCandidate(config_.seed, chunkX, chunkZ, 32, 5, 10387313, true) && biome == 24) {
         type = Type::Monument; return true;
     }
-    if (spacingCandidate(config_.seed, chunkX, chunkZ, 32, 8, 10387312, false) &&
+    if (settings_.useVillages &&
+        spacingCandidate(config_.seed, chunkX, chunkZ, 32, 8, 10387312, false) &&
         (biome == 1 || biome == 2 || biome == 5 || biome == 35)) {
         type = Type::Village; return true;
     }
-    if (spacingCandidate(config_.seed, chunkX, chunkZ, 32, 8, 14357617, false)) {
+    if (settings_.useTemples &&
+        spacingCandidate(config_.seed, chunkX, chunkZ, 32, 8, 14357617, false)) {
         if (biome == 2 || biome == 17) { type = Type::DesertPyramid; return true; }
         if (biome == 21 || biome == 22) { type = Type::JungleTemple; return true; }
         if (biome == 6) { type = Type::SwampHut; return true; }
         if (biome == 12 || biome == 30) { type = Type::Igloo; return true; }
     }
-    if (std::find(strongholds_.begin(), strongholds_.end(), std::pair{chunkX, chunkZ}) != strongholds_.end()) {
+    if (settings_.useStrongholds &&
+        std::find(strongholds_.begin(), strongholds_.end(), std::pair{chunkX, chunkZ}) != strongholds_.end()) {
         type = Type::Stronghold; return true;
     }
 
+    if (!settings_.useMineShafts) return false;
     JavaRandom seedRandom(config_.seed);
     const std::int64_t first = seedRandom.nextLong();
     const std::int64_t second = seedRandom.nextLong();

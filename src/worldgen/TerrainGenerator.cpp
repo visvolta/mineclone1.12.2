@@ -16,11 +16,10 @@ extern "C" {
 #include "world/World.hpp"
 #include "worldgen/BiomeProvider.hpp"
 #include "worldgen/CaveGenerator.hpp"
+#include "worldgen/ChunkGeneratorSettings.hpp"
 #include "worldgen/JavaRandom.hpp"
 
 namespace {
-
-constexpr int defaultSeaLevel = 63;
 
 BlockState block(BlockId id, std::uint8_t metadata = 0) {
     return makeBlockState(static_cast<std::uint16_t>(id), metadata);
@@ -140,7 +139,8 @@ void parseFlatSettings(std::string_view settings, std::vector<FlatLayer>& layers
 
 struct TerrainGenerator::Implementation {
     explicit Implementation(const WorldConfig& input)
-        : config(input), biomes(input), caves(input.seed) {
+        : config(input), settings(ChunkGeneratorSettings::fromConfig(input)),
+          biomes(input), caves(input.seed) {
         surfaceNoise = cbCreateSurfaceNoise(input.seed);
         if (surfaceNoise == nullptr) throw std::bad_alloc();
         for (int z = -2; z <= 2; ++z)
@@ -148,18 +148,10 @@ struct TerrainGenerator::Implementation {
                 weights[static_cast<std::size_t>((x + 2) + (z + 2) * 5)] =
                     10.0F / std::sqrt(static_cast<float>(x * x + z * z) + 0.2F);
         parseFlatSettings(input.generatorOptions, flatLayers, flatBiome);
-        seaLevel = input.worldType == WorldType::Customized
-            ? std::clamp(generatorOptionInt(input.generatorOptions, "seaLevel", defaultSeaLevel), 1, 255)
-            : defaultSeaLevel;
-        lavaOceans = input.worldType == WorldType::Customized &&
-            generatorOptionBool(input.generatorOptions, "useLavaOceans", false);
-        useCaves = input.worldType != WorldType::Customized ||
-            generatorOptionBool(input.generatorOptions, "useCaves", true);
-        useRavines = input.worldType != WorldType::Customized ||
-            generatorOptionBool(input.generatorOptions, "useRavines", true);
     }
 
     WorldConfig config;
+    ChunkGeneratorSettings settings;
     BiomeProvider biomes;
     CaveGenerator caves;
     ~Implementation() { cbDestroySurfaceNoise(surfaceNoise); }
@@ -168,10 +160,6 @@ struct TerrainGenerator::Implementation {
     std::array<float, 25> weights{};
     std::vector<FlatLayer> flatLayers;
     int flatBiome = 1;
-    int seaLevel = defaultSeaLevel;
-    bool lavaOceans = false;
-    bool useCaves = true;
-    bool useRavines = true;
 };
 
 TerrainGenerator::TerrainGenerator(const WorldConfig& config)
@@ -229,8 +217,10 @@ void TerrainGenerator::generateChunk(World& world, int chunkX, int chunkZ) {
                 for (int offsetZ = -2; offsetZ <= 2; ++offsetZ) {
                     const BiomeDefinition& nearby = BiomeProvider::definition(generationBiomes[
                         static_cast<std::size_t>(coarseX + offsetX + 2 + (coarseZ + offsetZ + 2) * 10)]);
-                    float nearbyDepth = nearby.baseHeight;
-                    float nearbyVariation = nearby.heightVariation;
+                    float nearbyDepth = implementation_->settings.biomeDepthOffset +
+                        nearby.baseHeight * implementation_->settings.biomeDepthWeight;
+                    float nearbyVariation = implementation_->settings.biomeScaleOffset +
+                        nearby.heightVariation * implementation_->settings.biomeScaleWeight;
                     if (implementation_->config.worldType == WorldType::Amplified && nearbyDepth > 0.0F) {
                         nearbyDepth = 1.0F + nearbyDepth * 2.0F;
                         nearbyVariation = 1.0F + nearbyVariation * 4.0F;
@@ -249,7 +239,8 @@ void TerrainGenerator::generateChunk(World& world, int chunkX, int chunkZ) {
             const int sampleX = chunkX * 4 + coarseX;
             const int sampleZ = chunkZ * 4 + coarseZ;
             double depthNoise = cbSampleDepthNoise(implementation_->surfaceNoise,
-                sampleX * 200.0, 10.0, sampleZ * 200.0) * 65535.0 / 8000.0;
+                sampleX * implementation_->settings.depthNoiseScaleX,
+                sampleZ * implementation_->settings.depthNoiseScaleZ) * 65535.0 / 8000.0;
             if (depthNoise < 0.0) depthNoise = -depthNoise * 0.3;
             depthNoise = depthNoise * 3.0 - 2.0;
             if (depthNoise < 0.0) {
@@ -260,13 +251,22 @@ void TerrainGenerator::generateChunk(World& world, int chunkX, int chunkZ) {
                 depthNoise = std::min(depthNoise, 1.0) / 8.0;
             }
             double adjustedDepth = static_cast<double>(depth) + depthNoise * 0.2;
-            adjustedDepth = adjustedDepth * 8.5 / 8.0;
-            const double base = 8.5 + adjustedDepth * 4.0;
+            adjustedDepth = adjustedDepth * implementation_->settings.baseSize / 8.0;
+            const double base = implementation_->settings.baseSize + adjustedDepth * 4.0;
 
             for (int coarseY = 0; coarseY < 33; ++coarseY) {
-                double falloff = (coarseY - base) * 12.0 * 128.0 / 256.0 / variation;
+                double falloff = (coarseY - base) * implementation_->settings.stretchY *
+                    128.0 / 256.0 / variation;
                 if (falloff < 0.0) falloff *= 4.0;
-                double value = cbSampleSurfaceNoise(implementation_->surfaceNoise, sampleX, coarseY, sampleZ) - falloff;
+                double value = cbSampleTerrainNoise(implementation_->surfaceNoise,
+                    sampleX, coarseY, sampleZ,
+                    implementation_->settings.coordinateScale,
+                    implementation_->settings.heightScale,
+                    implementation_->settings.lowerLimitScale,
+                    implementation_->settings.upperLimitScale,
+                    implementation_->settings.mainNoiseScaleX,
+                    implementation_->settings.mainNoiseScaleY,
+                    implementation_->settings.mainNoiseScaleZ) - falloff;
                 if (coarseY > 29) {
                     const double blend = static_cast<float>(coarseY - 29) / 3.0F;
                     value = value * (1.0 - blend) - 10.0 * blend;
@@ -294,8 +294,8 @@ void TerrainGenerator::generateChunk(World& world, int chunkX, int chunkZ) {
                     const double value = std::lerp(std::lerp(da, dc, fx), std::lerp(db, dd, fx), fz);
                     const int y = cellY * 8 + subY;
                     if (value > 0.0) world.setGeneratedBlock(originX + cellX * 4 + subX, y, originZ + cellZ * 4 + subZ, block(BlockId::Stone));
-                    else if (y < implementation_->seaLevel) world.setGeneratedBlock(originX + cellX * 4 + subX, y, originZ + cellZ * 4 + subZ,
-                        block(implementation_->lavaOceans ? BlockId::Lava : BlockId::Water));
+                    else if (y < implementation_->settings.seaLevel) world.setGeneratedBlock(originX + cellX * 4 + subX, y, originZ + cellZ * 4 + subZ,
+                        block(implementation_->settings.useLavaOceans ? BlockId::Lava : BlockId::Water));
                 }
             }
         }
@@ -328,17 +328,17 @@ void TerrainGenerator::generateChunk(World& world, int chunkX, int chunkZ) {
                 if (thickness <= 0) {
                     top = block(BlockId::Air);
                     filler = block(BlockId::Stone);
-                } else if (y < implementation_->seaLevel - 4 || y > implementation_->seaLevel + 1) {
+                } else if (y < implementation_->settings.seaLevel - 4 || y > implementation_->settings.seaLevel + 1) {
                     top = biomeTop;
                     filler = biomeFiller;
                 }
-                if (y < implementation_->seaLevel && blockId(top) == 0) {
+                if (y < implementation_->settings.seaLevel && blockId(top) == 0) {
                     top = BiomeProvider::definition(biomeId).temperature < 0.15F
                         ? block(BlockId::Ice) : block(BlockId::Water);
                 }
                 remaining = thickness;
-                if (y >= implementation_->seaLevel - 1) world.setGeneratedBlock(originX + x, y, originZ + z, top);
-                else if (y < implementation_->seaLevel - 7 - thickness) {
+                if (y >= implementation_->settings.seaLevel - 1) world.setGeneratedBlock(originX + x, y, originZ + z, top);
+                else if (y < implementation_->settings.seaLevel - 7 - thickness) {
                     top = block(BlockId::Air);
                     filler = block(BlockId::Stone);
                     world.setGeneratedBlock(originX + x, y, originZ + z, block(BlockId::Gravel));
@@ -355,5 +355,5 @@ void TerrainGenerator::generateChunk(World& world, int chunkX, int chunkZ) {
         }
     }
     implementation_->caves.generate(world, chunkX, chunkZ,
-        implementation_->useCaves, implementation_->useRavines);
+        implementation_->settings.useCaves, implementation_->settings.useRavines);
 }

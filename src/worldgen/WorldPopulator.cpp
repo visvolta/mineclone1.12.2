@@ -34,6 +34,13 @@ bool replaceableByTree(BlockState state) {
         id == BlockId::TallGrass || id == BlockId::Vine;
 }
 
+bool treeCanGrowInto(BlockState state) {
+    const auto id = static_cast<BlockId>(blockId(state));
+    return id == BlockId::Air || id == BlockId::Leaves || id == BlockId::Leaves2 ||
+        id == BlockId::Grass || id == BlockId::Dirt || id == BlockId::Log ||
+        id == BlockId::Log2 || id == BlockId::Sapling || id == BlockId::Vine;
+}
+
 bool supportsBush(BlockState state) {
     const auto id = static_cast<BlockId>(blockId(state));
     return id == BlockId::Grass || id == BlockId::Dirt || id == BlockId::Farmland;
@@ -198,6 +205,170 @@ void plantPatch(World& world, JavaRandom& random, int x, int y, int z,
     }
 }
 
+void placeLeafIfAir(World& world, int x, int y, int z, BlockState leaves) {
+    if (isAir(world, x, y, z)) world.setGeneratedBlock(x, y, z, leaves);
+}
+
+bool generateDarkOak(World& world, JavaRandom& random, int x, int y, int z) {
+    const int height = random.nextInt(3) + random.nextInt(2) + 6;
+    if (y < 1 || y + height + 1 >= chunkHeight) return false;
+    const BlockId soil = static_cast<BlockId>(blockId(world.getBlock(x, y - 1, z)));
+    if (soil != BlockId::Grass && soil != BlockId::Dirt) return false;
+    for (int dy = 0; dy <= height + 1; ++dy) {
+        int radius = 1;
+        if (dy == 0) radius = 0;
+        if (dy >= height - 1) radius = 2;
+        for (int dx = -radius; dx <= radius; ++dx)
+            for (int dz = -radius; dz <= radius; ++dz)
+                if (!treeCanGrowInto(world.getBlock(x + dx, y + dy, z + dz))) return false;
+    }
+
+    for (int dx = 0; dx <= 1; ++dx)
+        for (int dz = 0; dz <= 1; ++dz)
+            world.setGeneratedBlock(x + dx, y - 1, z + dz, block(BlockId::Dirt));
+    constexpr std::array<std::array<int, 2>, 4> directions{{
+        std::array{0, -1}, std::array{0, 1}, std::array{-1, 0}, std::array{1, 0}}};
+    const auto direction = directions[static_cast<std::size_t>(random.nextInt(4))];
+    const int bendStart = height - random.nextInt(4);
+    int bendLength = 2 - random.nextInt(3);
+    int trunkX = x;
+    int trunkZ = z;
+    const int crownY = y + height - 1;
+    const BlockState trunk = block(BlockId::Log2, 1);
+    const BlockState leaves = block(BlockId::Leaves2, 5);
+    for (int dy = 0; dy < height; ++dy) {
+        if (dy >= bendStart && bendLength > 0) {
+            trunkX += direction[0];
+            trunkZ += direction[1];
+            --bendLength;
+        }
+        const int py = y + dy;
+        if (treeCanGrowInto(world.getBlock(trunkX, py, trunkZ))) {
+            for (int dx = 0; dx <= 1; ++dx)
+                for (int dz = 0; dz <= 1; ++dz)
+                    if (treeCanGrowInto(world.getBlock(trunkX + dx, py, trunkZ + dz)))
+                        world.setGeneratedBlock(trunkX + dx, py, trunkZ + dz, trunk);
+        }
+    }
+
+    for (int dx = -2; dx <= 0; ++dx) {
+        for (int dz = -2; dz <= 0; ++dz) {
+            placeLeafIfAir(world, trunkX + dx, crownY - 1, trunkZ + dz, leaves);
+            placeLeafIfAir(world, 1 + trunkX - dx, crownY - 1, trunkZ + dz, leaves);
+            placeLeafIfAir(world, trunkX + dx, crownY - 1, 1 + trunkZ - dz, leaves);
+            placeLeafIfAir(world, 1 + trunkX - dx, crownY - 1, 1 + trunkZ - dz, leaves);
+            if ((dx > -2 || dz > -1) && (dx != -1 || dz != -2)) {
+                placeLeafIfAir(world, trunkX + dx, crownY + 1, trunkZ + dz, leaves);
+                placeLeafIfAir(world, 1 + trunkX - dx, crownY + 1, trunkZ + dz, leaves);
+                placeLeafIfAir(world, trunkX + dx, crownY + 1, 1 + trunkZ - dz, leaves);
+                placeLeafIfAir(world, 1 + trunkX - dx, crownY + 1, 1 + trunkZ - dz, leaves);
+            }
+        }
+    }
+    if (random.nextBoolean()) {
+        placeLeafIfAir(world, trunkX, crownY + 2, trunkZ, leaves);
+        placeLeafIfAir(world, trunkX + 1, crownY + 2, trunkZ, leaves);
+        placeLeafIfAir(world, trunkX + 1, crownY + 2, trunkZ + 1, leaves);
+        placeLeafIfAir(world, trunkX, crownY + 2, trunkZ + 1, leaves);
+    }
+    for (int dx = -3; dx <= 4; ++dx)
+        for (int dz = -3; dz <= 4; ++dz)
+            if ((dx != -3 || dz != -3) && (dx != -3 || dz != 4) &&
+                (dx != 4 || dz != -3) && (dx != 4 || dz != 4) &&
+                (std::abs(dx) < 3 || std::abs(dz) < 3))
+                placeLeafIfAir(world, trunkX + dx, crownY, trunkZ + dz, leaves);
+
+    for (int branchX = -1; branchX <= 2; ++branchX) {
+        for (int branchZ = -1; branchZ <= 2; ++branchZ) {
+            if (branchX >= 0 && branchX <= 1 && branchZ >= 0 && branchZ <= 1) continue;
+            if (random.nextInt(3) > 0) continue;
+            const int branchLength = random.nextInt(3) + 2;
+            for (int offset = 0; offset < branchLength; ++offset)
+                if (treeCanGrowInto(world.getBlock(x + branchX, crownY - offset - 1, z + branchZ)))
+                    world.setGeneratedBlock(x + branchX, crownY - offset - 1, z + branchZ, trunk);
+            for (int dx = -1; dx <= 1; ++dx)
+                for (int dz = -1; dz <= 1; ++dz)
+                    placeLeafIfAir(world, trunkX + branchX + dx, crownY, trunkZ + branchZ + dz, leaves);
+            for (int dx = -2; dx <= 2; ++dx)
+                for (int dz = -2; dz <= 2; ++dz)
+                    if (std::abs(dx) != 2 || std::abs(dz) != 2)
+                        placeLeafIfAir(world, trunkX + branchX + dx, crownY - 1,
+                                       trunkZ + branchZ + dz, leaves);
+        }
+    }
+    return true;
+}
+
+bool generateHugeMushroom(World& world, JavaRandom& random, int x, int y, int z) {
+    const bool brown = random.nextBoolean();
+    int height = random.nextInt(3) + 4;
+    if (random.nextInt(12) == 0) height *= 2;
+    if (y < 1 || y + height + 1 >= chunkHeight) return false;
+    for (int py = y; py <= y + height + 1; ++py) {
+        const int radius = py <= y + 3 ? 0 : 3;
+        for (int px = x - radius; px <= x + radius; ++px)
+            for (int pz = z - radius; pz <= z + radius; ++pz) {
+                const BlockId id = static_cast<BlockId>(blockId(world.getBlock(px, py, pz)));
+                if (id != BlockId::Air && id != BlockId::Leaves && id != BlockId::Leaves2) return false;
+            }
+    }
+    const BlockId soil = static_cast<BlockId>(blockId(world.getBlock(x, y - 1, z)));
+    if (soil != BlockId::Dirt && soil != BlockId::Grass && soil != BlockId::Mycelium) return false;
+    const BlockId cap = brown ? BlockId::BrownMushroomBlock : BlockId::RedMushroomBlock;
+    const int firstCapY = brown ? y + height : y + height - 3;
+    for (int py = firstCapY; py <= y + height; ++py) {
+        int radius = py < y + height ? 2 : 1;
+        if (brown) radius = 3;
+        const int minX = x - radius;
+        const int maxX = x + radius;
+        const int minZ = z - radius;
+        const int maxZ = z + radius;
+        for (int px = minX; px <= maxX; ++px) {
+            for (int pz = minZ; pz <= maxZ; ++pz) {
+                int meta = 5;
+                if (px == minX) --meta;
+                else if (px == maxX) ++meta;
+                if (pz == minZ) meta -= 3;
+                else if (pz == maxZ) meta += 3;
+                if (brown || py < y + height) {
+                    if ((px == minX || px == maxX) && (pz == minZ || pz == maxZ)) continue;
+                    if (px == x - (radius - 1) && pz == minZ) meta = 1;
+                    if (px == minX && pz == z - (radius - 1)) meta = 1;
+                    if (px == x + (radius - 1) && pz == minZ) meta = 3;
+                    if (px == maxX && pz == z - (radius - 1)) meta = 3;
+                    if (px == x - (radius - 1) && pz == maxZ) meta = 7;
+                    if (px == minX && pz == z + (radius - 1)) meta = 7;
+                    if (px == x + (radius - 1) && pz == maxZ) meta = 9;
+                    if (px == maxX && pz == z + (radius - 1)) meta = 9;
+                }
+                if (meta == 5 && py < y + height) meta = 0;
+                if (meta != 0 && !BlockRegistry::get(world.getBlock(px, py, pz)).fullCube)
+                    world.setGeneratedBlock(px, py, pz, block(cap, static_cast<std::uint8_t>(meta)));
+            }
+        }
+    }
+    for (int offset = 0; offset < height; ++offset)
+        if (!BlockRegistry::get(world.getBlock(x, y + offset, z)).fullCube)
+            world.setGeneratedBlock(x, y + offset, z, block(cap, 10));
+    return true;
+}
+
+bool generateDoublePlant(World& world, JavaRandom& random, int x, int y, int z,
+                         std::uint8_t type) {
+    bool placed = false;
+    for (int attempt = 0; attempt < 64; ++attempt) {
+        const int px = x + random.nextInt(8) - random.nextInt(8);
+        const int py = y + random.nextInt(4) - random.nextInt(4);
+        const int pz = z + random.nextInt(8) - random.nextInt(8);
+        if (py <= 0 || py >= 255 || !isAir(world, px, py, pz) || !isAir(world, px, py + 1, pz) ||
+            !supportsBush(world.getBlock(px, py - 1, pz))) continue;
+        world.setGeneratedBlock(px, py, pz, block(BlockId::DoublePlant, type));
+        world.setGeneratedBlock(px, py + 1, pz, block(BlockId::DoublePlant, 8));
+        placed = true;
+    }
+    return placed;
+}
+
 } // namespace
 
 bool WorldPopulator::generateLake(World& world, JavaRandom& random, int x, int y, int z,
@@ -338,8 +509,12 @@ void WorldPopulator::generateOre(World& world, JavaRandom& random, int x, int y,
 }
 
 void WorldPopulator::generateTree(World& world, JavaRandom& random, int x, int y, int z,
-                                  int biomeId) const {
-    const int species = treeSpecies(biomeId, random);
+                                  int biomeId, int forcedSpecies) const {
+    const int species = forcedSpecies >= 0 ? forcedSpecies : treeSpecies(biomeId, random);
+    if (species == 5) {
+        static_cast<void>(generateDarkOak(world, random, x, y, z));
+        return;
+    }
     int height = species == 1 ? random.nextInt(4) + 6 : random.nextInt(3) + (species == 2 ? 5 : 4);
     if (species == 3) height = random.nextInt(4) + 7;
     if (species == 4) height = random.nextInt(3) + random.nextInt(3) + 5;
@@ -400,25 +575,82 @@ void WorldPopulator::decorate(World& world, JavaRandom& random, int chunkX, int 
                               int biomeId) const {
     const int originX = chunkX * chunkSize;
     const int originZ = chunkZ * chunkSize;
+
+    const bool roofedForest = biomeId == 29 || biomeId == 157;
+    if (roofedForest) {
+        for (int gridX = 0; gridX < 4; ++gridX) {
+            for (int gridZ = 0; gridZ < 4; ++gridZ) {
+                const int x = originX + gridX * 4 + 9 + random.nextInt(3);
+                const int z = originZ + gridZ * 4 + 9 + random.nextInt(3);
+                const int y = surfaceY(world, x, z);
+                if (random.nextInt(20) == 0) {
+                    static_cast<void>(generateHugeMushroom(world, random, x, y, z));
+                    continue;
+                }
+                int species;
+                if (random.nextInt(3) > 0) species = 5;
+                else if (random.nextInt(5) != 0) species = random.nextInt(10) == 0 ? 0 : 0;
+                else species = 2;
+                generateTree(world, random, x, y, z, biomeId, species);
+            }
+        }
+    }
+
+    const bool forest = biomeId == 4 || biomeId == 18 || biomeId == 27 || biomeId == 28 ||
+        biomeId == 29 || biomeId == 132 || biomeId == 155 || biomeId == 156 || biomeId == 157;
+    if (forest) {
+        int patches = random.nextInt(5) - 3;
+        if (biomeId == 132) patches += 2;
+        for (int patch = 0; patch < patches; ++patch) {
+            constexpr std::array<std::uint8_t, 3> types{1, 4, 5};
+            const std::uint8_t type = types[static_cast<std::size_t>(random.nextInt(3))];
+            for (int attempt = 0; attempt < 5; ++attempt) {
+                const int x = originX + random.nextInt(16) + 8;
+                const int z = originZ + random.nextInt(16) + 8;
+                const int maximum = surfaceY(world, x, z) + 32;
+                if (maximum > 0 && generateDoublePlant(world, random, x,
+                    random.nextInt(maximum), z, type)) break;
+            }
+        }
+    }
+
     const auto ore = [&](int count, int size, int minimum, int maximum, BlockState state) {
+        if (maximum < minimum) std::swap(minimum, maximum);
+        else if (maximum == minimum) {
+            if (minimum < 255) ++maximum;
+            else --minimum;
+        }
         for (int attempt = 0; attempt < count; ++attempt)
             generateOre(world, random, originX + random.nextInt(16),
                         minimum + random.nextInt(maximum - minimum),
                         originZ + random.nextInt(16), state, size);
     };
-    ore(10, 33, 0, 256, block(BlockId::Dirt));
-    ore(8, 33, 0, 256, block(BlockId::Gravel));
-    ore(10, 33, 0, 80, block(BlockId::Stone, 3));
-    ore(10, 33, 0, 80, block(BlockId::Stone, 1));
-    ore(10, 33, 0, 80, block(BlockId::Stone, 5));
-    ore(20, 17, 0, 128, block(BlockId::CoalOre));
-    ore(20, 9, 0, 64, block(BlockId::IronOre));
-    ore(2, 9, 0, 32, block(BlockId::GoldOre));
-    ore(8, 8, 0, 16, block(BlockId::RedstoneOre));
-    ore(1, 8, 0, 16, block(BlockId::DiamondOre));
-    generateOre(world, random, originX + random.nextInt(16),
-                random.nextInt(16) + random.nextInt(16), originZ + random.nextInt(16),
-                block(BlockId::LapisOre), 7);
+    ore(settings_.dirtCount, settings_.dirtSize, settings_.dirtMinHeight,
+        settings_.dirtMaxHeight, block(BlockId::Dirt));
+    ore(settings_.gravelCount, settings_.gravelSize, settings_.gravelMinHeight,
+        settings_.gravelMaxHeight, block(BlockId::Gravel));
+    ore(settings_.dioriteCount, settings_.dioriteSize, settings_.dioriteMinHeight,
+        settings_.dioriteMaxHeight, block(BlockId::Stone, 3));
+    ore(settings_.graniteCount, settings_.graniteSize, settings_.graniteMinHeight,
+        settings_.graniteMaxHeight, block(BlockId::Stone, 1));
+    ore(settings_.andesiteCount, settings_.andesiteSize, settings_.andesiteMinHeight,
+        settings_.andesiteMaxHeight, block(BlockId::Stone, 5));
+    ore(settings_.coalCount, settings_.coalSize, settings_.coalMinHeight,
+        settings_.coalMaxHeight, block(BlockId::CoalOre));
+    ore(settings_.ironCount, settings_.ironSize, settings_.ironMinHeight,
+        settings_.ironMaxHeight, block(BlockId::IronOre));
+    ore(settings_.goldCount, settings_.goldSize, settings_.goldMinHeight,
+        settings_.goldMaxHeight, block(BlockId::GoldOre));
+    ore(settings_.redstoneCount, settings_.redstoneSize, settings_.redstoneMinHeight,
+        settings_.redstoneMaxHeight, block(BlockId::RedstoneOre));
+    ore(settings_.diamondCount, settings_.diamondSize, settings_.diamondMinHeight,
+        settings_.diamondMaxHeight, block(BlockId::DiamondOre));
+    for (int attempt = 0; attempt < settings_.lapisCount; ++attempt) {
+        generateOre(world, random, originX + random.nextInt(16),
+                    random.nextInt(settings_.lapisSpread) + random.nextInt(settings_.lapisSpread) +
+                        settings_.lapisCenterHeight - settings_.lapisSpread,
+                    originZ + random.nextInt(16), block(BlockId::LapisOre), settings_.lapisSize);
+    }
 
     if (biomeId == 3 || biomeId == 20 || biomeId == 34 || biomeId == 131 || biomeId == 162) {
         for (int count = 3 + random.nextInt(6); count > 0; --count) {
@@ -572,28 +804,20 @@ void WorldPopulator::populate(World& world, int chunkX, int chunkZ) const {
 
     const int originX = chunkX * chunkSize;
     const int originZ = chunkZ * chunkSize;
-    const bool desert = biome == 2 || biome == 17 || biome == 130;
-    const int waterLakeChance = std::max(1, generatorOptionInt(config_.generatorOptions,
-                                                               "waterLakeChance", 4));
-    if (generatorOptionBool(config_.generatorOptions, "useWaterLakes", true) && !desert &&
-        random.nextInt(waterLakeChance) == 0) {
+    const bool desert = biome == 2 || biome == 17;
+    if (settings_.useWaterLakes && !desert && random.nextInt(settings_.waterLakeChance) == 0) {
         generateLake(world, random, originX + random.nextInt(16) + 8, random.nextInt(256),
                      originZ + random.nextInt(16) + 8, block(BlockId::Water));
     }
-    const int lavaLakeChance = std::max(10, generatorOptionInt(config_.generatorOptions,
-                                                               "lavaLakeChance", 80));
-    if (generatorOptionBool(config_.generatorOptions, "useLavaLakes", true) &&
-        random.nextInt(lavaLakeChance / 10) == 0) {
+    if (settings_.useLavaLakes && random.nextInt(settings_.lavaLakeChance / 10) == 0) {
         const int x = originX + random.nextInt(16) + 8;
         const int y = random.nextInt(random.nextInt(248) + 8);
         const int z = originZ + random.nextInt(16) + 8;
-        if (y < 63 || random.nextInt(lavaLakeChance / 8) == 0)
+        if (y < settings_.seaLevel || random.nextInt(settings_.lavaLakeChance / 8) == 0)
             generateLake(world, random, x, y, z, block(BlockId::Lava));
     }
-    if (generatorOptionBool(config_.generatorOptions, "useDungeons", true)) {
-        const int attempts = std::max(0, generatorOptionInt(config_.generatorOptions,
-                                                            "dungeonChance", 8));
-        for (int attempt = 0; attempt < attempts; ++attempt)
+    if (settings_.useDungeons) {
+        for (int attempt = 0; attempt < settings_.dungeonChance; ++attempt)
             generateDungeon(world, random, originX + random.nextInt(16) + 8,
                             random.nextInt(256), originZ + random.nextInt(16) + 8);
     }
