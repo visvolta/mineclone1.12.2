@@ -9,7 +9,6 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 include(FetchContent)
 find_package(Threads REQUIRED)
-find_package(ZLIB REQUIRED)
 
 # Visual Studio's stock Debug flags use /Od and /RTC1. Runtime checks cannot
 # coexist with optimization, so remove only /RTC1 and apply /O2 per project
@@ -37,8 +36,15 @@ FetchContent_Declare(
     GIT_REPOSITORY https://github.com/nothings/stb.git
     GIT_TAG f58f558c120e9b32c217290b80bad1a0729fbb2c
 )
+FetchContent_Declare(
+    zlib
+    GIT_REPOSITORY https://github.com/madler/zlib.git
+    GIT_TAG v1.3.1
+    GIT_SHALLOW TRUE
+)
 
-FetchContent_MakeAvailable(glfw glm glad stb)
+set(ZLIB_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(glfw glm glad stb zlib)
 glad_add_library(glad_gl_core_33 STATIC REPRODUCIBLE API gl:core=3.3)
 
 add_library(cubiomes STATIC
@@ -188,7 +194,7 @@ target_compile_definitions(blockcraft PRIVATE
     $<$<AND:$<CONFIG:Debug>,$<CXX_COMPILER_ID:MSVC>>:BLOCKCRAFT_OPTIMIZED_DEBUG=1>
 )
 configure_file(world.cfg world.cfg COPYONLY)
-target_link_libraries(blockcraft PRIVATE glfw glad_gl_core_33 glm::glm cubiomes Threads::Threads ZLIB::ZLIB)
+target_link_libraries(blockcraft PRIVATE glfw glad_gl_core_33 glm::glm cubiomes Threads::Threads zlibstatic)
 
 if(MSVC)
     target_compile_options(blockcraft PRIVATE /W4 /permissive- $<$<CONFIG:Debug>:/O2>)
@@ -203,7 +209,7 @@ if(BUILD_TESTING)
     target_compile_definitions(blockcraft_tests PRIVATE
         BLOCKCRAFT_ASSET_ROOT="${BLOCKCRAFT_ASSET_ROOT}"
     )
-    target_link_libraries(blockcraft_tests PRIVATE glm::glm cubiomes Threads::Threads ZLIB::ZLIB)
+    target_link_libraries(blockcraft_tests PRIVATE glm::glm cubiomes Threads::Threads zlibstatic)
     if(MSVC)
         target_compile_options(blockcraft_tests PRIVATE $<$<CONFIG:Debug>:/O2> /UNDEBUG)
     else()
