@@ -10,10 +10,12 @@
 
 #include <glad/gl.h>
 #include <glm/mat4x4.hpp>
+#include <glm/vec3.hpp>
 
-#include "rendering/Shader.hpp"
 #include "rendering/ChunkMesher.hpp"
+#include "rendering/Shader.hpp"
 
+class BlockRenderResources;
 class TextureAtlas;
 class ThreadPool;
 class World;
@@ -28,16 +30,24 @@ public:
     GpuMesh& operator=(const GpuMesh&) = delete;
     GpuMesh(GpuMesh&& other) noexcept;
     GpuMesh& operator=(GpuMesh&& other) noexcept;
-    void upload(const struct MeshData& data);
+
+    void upload(const MeshData& data, bool translucent = false);
+    void sortTranslucent(const glm::vec3& cameraLocal);
     void draw() const;
     [[nodiscard]] bool empty() const { return indexCount_ == 0; }
 
 private:
     void release();
+
     GLuint vao_ = 0;
     GLuint vbo_ = 0;
     GLuint ebo_ = 0;
     GLsizei indexCount_ = 0;
+    bool translucent_ = false;
+    bool hasSortPosition_ = false;
+    glm::vec3 lastSortPosition_{};
+    std::vector<std::uint32_t> baseIndices_;
+    std::vector<glm::vec3> quadCenters_;
 };
 
 struct WorldRenderStats {
@@ -49,7 +59,8 @@ struct WorldRenderStats {
 
 class WorldRenderer {
 public:
-    WorldRenderer(const World& world, const TextureAtlas& atlas, ThreadPool& workers);
+    WorldRenderer(const World& world, TextureAtlas& atlas,
+                  const BlockRenderResources& resources, ThreadPool& workers);
     ~WorldRenderer();
     WorldRenderer(const WorldRenderer&) = delete;
     WorldRenderer& operator=(const WorldRenderer&) = delete;
@@ -78,7 +89,7 @@ private:
     };
     struct RenderSection {
         SectionKey key;
-        std::array<GpuMesh, 3> layers;
+        std::array<GpuMesh, static_cast<std::size_t>(RenderLayer::Count)> layers;
         glm::mat4 model{1.0F};
     };
     struct MeshJobState {
@@ -96,16 +107,19 @@ private:
     [[nodiscard]] bool processOneCompleted();
     void requestChunkSections(int chunkX, int chunkZ);
     [[nodiscard]] bool lightingNeighborhoodReady(int chunkX, int chunkZ) const;
-    void renderLayer(std::size_t layer, const std::vector<const RenderSection*>& visible);
+    void renderLayer(std::size_t layer, const std::vector<RenderSection*>& visible,
+                     const glm::vec3* cameraWorld = nullptr);
 
     const World& world_;
-    const TextureAtlas& atlas_;
+    TextureAtlas& atlas_;
+    const BlockRenderResources& resources_;
     ThreadPool& workers_;
     Shader shader_;
     GLint modelLocation_ = -1;
     GLint viewLocation_ = -1;
     GLint projectionLocation_ = -1;
     GLint atlasLocation_ = -1;
+    GLint renderLayerLocation_ = -1;
     GLint skyLightSubtractedLocation_ = -1;
     GLint fogColorLocation_ = -1;
     GLint fogModeLocation_ = -1;
@@ -117,6 +131,7 @@ private:
     std::deque<SectionKey> pendingSections_;
     std::unordered_map<SectionKey, RenderSection, SectionKeyHash> sections_;
     std::unordered_map<SectionKey, MeshJobState, SectionKeyHash> meshJobs_;
-    std::vector<const RenderSection*> visibleSections_;
+    std::vector<RenderSection*> visibleSections_;
+    std::vector<RenderSection*> translucentSections_;
     WorldRenderStats stats_;
 };

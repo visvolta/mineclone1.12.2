@@ -60,7 +60,8 @@ int main() {
             const BlockState state = makeBlockState(id, metadata);
             const BlockDefinition& definition = BlockRegistry::get(state);
             assert(!definition.name.empty());
-            assert(static_cast<unsigned>(definition.layer) < 3U);
+            assert(static_cast<unsigned>(definition.layer) <
+                   static_cast<unsigned>(RenderLayer::Count));
             assert(definition.lightValue <= 15U);
             for (Face face : {Face::Down, Face::Up, Face::North, Face::South, Face::West, Face::East}) {
                 const auto texture = static_cast<std::uint16_t>(BlockRegistry::texture(state, face));

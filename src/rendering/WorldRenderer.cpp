@@ -8,8 +8,10 @@
 #include <mutex>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 #include <glm/ext/matrix_transform.hpp>
+#include <glm/matrix.hpp>
 #include <glm/geometric.hpp>
 #include <glm/vec3.hpp>
 #include <glm/vec4.hpp>
@@ -17,6 +19,7 @@
 #include "core/ThreadPool.hpp"
 #include "environment/Environment.hpp"
 #include "lighting/LightingEngine.hpp"
+#include "rendering/BlockRenderResources.hpp"
 #include "rendering/ChunkMesher.hpp"
 #include "rendering/TextureAtlas.hpp"
 #include "world/World.hpp"
@@ -67,6 +70,7 @@ in vec2 lightLevels;
 in vec3 viewPosition;
 out vec4 fragmentColor;
 uniform sampler2D atlas;
+uniform int renderLayer;
 uniform float skyLightSubtracted;
 uniform vec3 fogColor;
 uniform int fogMode;
@@ -100,9 +104,16 @@ void main() {
     } else {
         base.rgb *= tint;
     }
-    // Solid/cutout layers never blend. Transparent texels are discarded and
-    // can therefore never turn into black quads at distance.
-    if (base.a < 0.1) discard;
+    // 1.12.2 cutout models use alpha testing while the translucent layer
+    // keeps partial alpha (water, stained glass, ice).
+    if (renderLayer == 3) {
+        if (base.a <= 0.001) discard;
+    } else if (renderLayer == 1) {
+        // CUTOUT_MIPPED uses the stricter vanilla alpha threshold.
+        if (base.a < 0.5) discard;
+    } else if (base.a < 0.1) {
+        discard;
+    }
     base.rgb *= shade;
     base.rgb *= vanillaLightmap(lightLevels);
     float distanceToCamera = length(viewPosition);
@@ -181,6 +192,11 @@ GpuMesh& GpuMesh::operator=(GpuMesh&& other) noexcept {
     vbo_ = std::exchange(other.vbo_, 0);
     ebo_ = std::exchange(other.ebo_, 0);
     indexCount_ = std::exchange(other.indexCount_, 0);
+    translucent_ = std::exchange(other.translucent_, false);
+    hasSortPosition_ = std::exchange(other.hasSortPosition_, false);
+    lastSortPosition_ = other.lastSortPosition_;
+    baseIndices_ = std::move(other.baseIndices_);
+    quadCenters_ = std::move(other.quadCenters_);
     return *this;
 }
 
@@ -190,9 +206,13 @@ void GpuMesh::release() {
     if (vao_ != 0) glDeleteVertexArrays(1, &vao_);
     vao_ = vbo_ = ebo_ = 0;
     indexCount_ = 0;
+    translucent_ = false;
+    hasSortPosition_ = false;
+    baseIndices_.clear();
+    quadCenters_.clear();
 }
 
-void GpuMesh::upload(const MeshData& data) {
+void GpuMesh::upload(const MeshData& data, bool translucent) {
     release();
     if (data.indices.empty()) return;
     glGenVertexArrays(1, &vao_);
@@ -215,6 +235,55 @@ void GpuMesh::upload(const MeshData& data) {
     glVertexAttribPointer(7, 1, GL_FLOAT, GL_FALSE, stride, reinterpret_cast<void*>(offsetof(MeshVertex, blockLight)));
     for (GLuint attribute = 0; attribute < 8; ++attribute) glEnableVertexAttribArray(attribute);
     indexCount_ = static_cast<GLsizei>(data.indices.size());
+    translucent_ = translucent;
+    if (translucent_) {
+        baseIndices_ = data.indices;
+        quadCenters_.reserve(data.indices.size() / 6);
+        for (std::size_t offset = 0; offset + 5 < data.indices.size(); offset += 6) {
+            std::array<std::uint32_t, 6> unique{};
+            std::size_t uniqueCount = 0;
+            for (std::size_t i = 0; i < 6; ++i) {
+                const std::uint32_t candidate = data.indices[offset + i];
+                bool seen = false;
+                for (std::size_t j = 0; j < uniqueCount; ++j) seen = seen || unique[j] == candidate;
+                if (!seen && uniqueCount < unique.size()) unique[uniqueCount++] = candidate;
+            }
+            glm::vec3 center{};
+            for (std::size_t i = 0; i < uniqueCount; ++i) {
+                const MeshVertex& vertex = data.vertices[unique[i]];
+                center += glm::vec3(vertex.x, vertex.y, vertex.z);
+            }
+            if (uniqueCount > 0) center /= static_cast<float>(uniqueCount);
+            quadCenters_.push_back(center);
+        }
+    }
+}
+
+void GpuMesh::sortTranslucent(const glm::vec3& cameraLocal) {
+    if (!translucent_ || baseIndices_.empty() || quadCenters_.empty()) return;
+    if (hasSortPosition_ && glm::dot(cameraLocal - lastSortPosition_, cameraLocal - lastSortPosition_) < 0.25F) return;
+    lastSortPosition_ = cameraLocal;
+    hasSortPosition_ = true;
+
+    std::vector<std::size_t> order(quadCenters_.size());
+    for (std::size_t i = 0; i < order.size(); ++i) order[i] = i;
+    std::stable_sort(order.begin(), order.end(), [&](std::size_t left, std::size_t right) {
+        const glm::vec3 dl = quadCenters_[left] - cameraLocal;
+        const glm::vec3 dr = quadCenters_[right] - cameraLocal;
+        return glm::dot(dl, dl) > glm::dot(dr, dr);
+    });
+
+    std::vector<std::uint32_t> sorted;
+    sorted.reserve(baseIndices_.size());
+    for (const std::size_t quad : order) {
+        const std::size_t offset = quad * 6;
+        if (offset + 5 >= baseIndices_.size()) continue;
+        sorted.insert(sorted.end(), baseIndices_.begin() + static_cast<std::ptrdiff_t>(offset),
+                      baseIndices_.begin() + static_cast<std::ptrdiff_t>(offset + 6));
+    }
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo_);
+    glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0,
+                    static_cast<GLsizeiptr>(sorted.size() * sizeof(std::uint32_t)), sorted.data());
 }
 
 void GpuMesh::draw() const {
@@ -230,12 +299,14 @@ std::size_t WorldRenderer::SectionKeyHash::operator()(const SectionKey& value) c
     return hash;
 }
 
-WorldRenderer::WorldRenderer(const World& world, const TextureAtlas& atlas, ThreadPool& workers)
-    : world_(world), atlas_(atlas), workers_(workers), shader_(vertexSource, fragmentSource),
+WorldRenderer::WorldRenderer(const World& world, TextureAtlas& atlas,
+                             const BlockRenderResources& resources, ThreadPool& workers)
+    : world_(world), atlas_(atlas), resources_(resources), workers_(workers), shader_(vertexSource, fragmentSource),
       modelLocation_(shader_.uniformLocation("model")),
       viewLocation_(shader_.uniformLocation("view")),
       projectionLocation_(shader_.uniformLocation("projection")),
       atlasLocation_(shader_.uniformLocation("atlas")),
+      renderLayerLocation_(shader_.uniformLocation("renderLayer")),
       skyLightSubtractedLocation_(shader_.uniformLocation("skyLightSubtracted")),
       fogColorLocation_(shader_.uniformLocation("fogColor")),
       fogModeLocation_(shader_.uniformLocation("fogMode")),
@@ -288,9 +359,10 @@ bool WorldRenderer::enqueueNextPending() {
     state->queued = true;
     const std::uint64_t version = state->desiredVersion;
     const std::shared_ptr<CompletionQueue> completions = completions_;
+    const BlockRenderResources* resources = &resources_;
     workers_.enqueue(WorkerTaskClass::Meshing, 200000 + key.sectionY,
-                     [key, version, snapshot = std::move(snapshot), completions] {
-        CompletionQueue::CompletedMesh completed{key, version, ChunkMesher::build(snapshot)};
+                     [key, version, snapshot = std::move(snapshot), completions, resources] {
+        CompletionQueue::CompletedMesh completed{key, version, ChunkMesher::build(snapshot, *resources)};
         std::lock_guard lock(completions->mutex);
         completions->meshes.push_back(std::move(completed));
     });
@@ -324,7 +396,7 @@ void WorldRenderer::applyMeshData(const SectionKey& key, const SectionMeshData& 
             key.chunkX * chunkSize, key.sectionY * sectionSize, key.chunkZ * chunkSize));
     }
     for (std::size_t layer = 0; layer < renderSection.layers.size(); ++layer)
-        renderSection.layers[layer].upload(data[layer]);
+        renderSection.layers[layer].upload(data[layer], layer == static_cast<std::size_t>(RenderLayer::Translucent));
 }
 
 void WorldRenderer::rebuildSectionSync(const SectionKey& key) {
@@ -340,7 +412,7 @@ void WorldRenderer::rebuildSectionSync(const SectionKey& key) {
     if (section == nullptr || section->empty()) {
         sections_.erase(key);
     } else {
-        applyMeshData(key, ChunkMesher::build(world_, key.chunkX, key.sectionY, key.chunkZ));
+        applyMeshData(key, ChunkMesher::build(world_, key.chunkX, key.sectionY, key.chunkZ, resources_));
     }
     state.appliedVersion = version;
 }
@@ -474,10 +546,20 @@ std::size_t WorldRenderer::pendingMeshCount() const {
         [](const auto& entry) { return entry.second.queued || entry.second.pending; }));
 }
 
-void WorldRenderer::renderLayer(std::size_t layer, const std::vector<const RenderSection*>& visible) {
-    for (const RenderSection* section : visible) {
-        const GpuMesh& mesh = section->layers[layer];
+void WorldRenderer::renderLayer(std::size_t layer, const std::vector<RenderSection*>& visible,
+                                const glm::vec3* cameraWorld) {
+    glUniform1i(renderLayerLocation_, static_cast<GLint>(layer));
+    for (RenderSection* section : visible) {
+        GpuMesh& mesh = section->layers[layer];
         if (mesh.empty()) continue;
+        if (cameraWorld != nullptr && layer == static_cast<std::size_t>(RenderLayer::Translucent)) {
+            const glm::vec3 sectionOrigin{
+                static_cast<float>(section->key.chunkX * chunkSize),
+                static_cast<float>(section->key.sectionY * sectionSize),
+                static_cast<float>(section->key.chunkZ * chunkSize)
+            };
+            mesh.sortTranslucent(*cameraWorld - sectionOrigin);
+        }
         shader_.setMat4(modelLocation_, section->model);
         mesh.draw();
         ++stats_.drawCalls;
@@ -489,13 +571,36 @@ void WorldRenderer::render(const glm::mat4& view, const glm::mat4& projection,
     const Frustum frustum(projection * view);
     visibleSections_.clear();
     visibleSections_.reserve(sections_.size());
-    for (const auto& [key, section] : sections_) {
+    for (auto& [key, section] : sections_) {
         if (frustum.containsSection(key.chunkX, key.sectionY, key.chunkZ)) visibleSections_.push_back(&section);
     }
     stats_.totalSections = sections_.size();
     stats_.visibleSections = visibleSections_.size();
     stats_.culledSections = stats_.totalSections - stats_.visibleSections;
     stats_.drawCalls = 0;
+
+    const glm::mat4 inverseView = glm::inverse(view);
+    const glm::vec3 cameraWorld{inverseView[3]};
+
+    // Vanilla's translucent chunk path sorts from back to front. Section order
+    // is sorted first, then each translucent EBO is re-ordered by quad center.
+    translucentSections_ = visibleSections_;
+    std::stable_sort(translucentSections_.begin(), translucentSections_.end(),
+        [&](const RenderSection* left, const RenderSection* right) {
+            const glm::vec3 leftCenter{
+                left->key.chunkX * chunkSize + sectionSize * 0.5F,
+                left->key.sectionY * sectionSize + sectionSize * 0.5F,
+                left->key.chunkZ * chunkSize + sectionSize * 0.5F
+            };
+            const glm::vec3 rightCenter{
+                right->key.chunkX * chunkSize + sectionSize * 0.5F,
+                right->key.sectionY * sectionSize + sectionSize * 0.5F,
+                right->key.chunkZ * chunkSize + sectionSize * 0.5F
+            };
+            const glm::vec3 dl = leftCenter - cameraWorld;
+            const glm::vec3 dr = rightCenter - cameraWorld;
+            return glm::dot(dl, dl) > glm::dot(dr, dr);
+        });
 
     shader_.use();
     shader_.setMat4(viewLocation_, view);
@@ -506,13 +611,17 @@ void WorldRenderer::render(const glm::mat4& view, const glm::mat4& projection,
     glUniform1f(fogStartLocation_, environment.fogStart);
     glUniform1f(fogEndLocation_, environment.fogEnd);
     glUniform1f(fogDensityLocation_, environment.fogDensity);
+
+    atlas_.updateAnimations(environment.rendererTicks);
     atlas_.bind(0);
     renderLayer(static_cast<std::size_t>(RenderLayer::Solid), visibleSections_);
+    renderLayer(static_cast<std::size_t>(RenderLayer::CutoutMipped), visibleSections_);
     renderLayer(static_cast<std::size_t>(RenderLayer::Cutout), visibleSections_);
+
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glDepthMask(GL_FALSE);
-    renderLayer(static_cast<std::size_t>(RenderLayer::Translucent), visibleSections_);
+    renderLayer(static_cast<std::size_t>(RenderLayer::Translucent), translucentSections_, &cameraWorld);
     glDepthMask(GL_TRUE);
     glDisable(GL_BLEND);
 }

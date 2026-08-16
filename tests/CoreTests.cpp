@@ -14,7 +14,9 @@
 #include "lighting/LightSolver.hpp"
 #include "lighting/LightingEngine.hpp"
 #include "player/Player.hpp"
-#include "rendering/AtlasLayout.hpp"
+#include "rendering/BlockRenderResources.hpp"
+#include "rendering/BlockStateModelMap.hpp"
+#include "rendering/TextureAtlasData.hpp"
 #include "rendering/ChunkMesher.hpp"
 #include "rendering/CloudGeometry.hpp"
 #include "world/Chunk.hpp"
@@ -33,6 +35,11 @@ constexpr BlockState block(BlockId id, std::uint8_t metadata = 0) {
 }
 
 std::size_t quadCount(const MeshData& mesh) { return mesh.indices.size() / 6; }
+
+const BlockRenderResources& renderResources() {
+    static const BlockRenderResources resources(BLOCKCRAFT_ASSET_ROOT);
+    return resources;
+}
 
 void testBlockStatePacking() {
     const BlockState oakXAxis = block(BlockId::Log, 4);
@@ -116,35 +123,35 @@ void testNegativeCoordinates() {
 void testMeshing() {
     World isolated;
     isolated.setBlock(1, 1, 1, block(BlockId::Stone));
-    const SectionMeshData isolatedMesh = ChunkMesher::build(isolated, 0, 0, 0);
+    const SectionMeshData isolatedMesh = ChunkMesher::build(isolated, 0, 0, 0, renderResources());
     assert(quadCount(isolatedMesh[0]) == 6);
 
     isolated.setBlock(2, 1, 1, block(BlockId::Stone));
-    const SectionMeshData joinedMesh = ChunkMesher::build(isolated, 0, 0, 0);
+    const SectionMeshData joinedMesh = ChunkMesher::build(isolated, 0, 0, 0, renderResources());
     assert(quadCount(joinedMesh[0]) == 10);
 
     World border;
     border.setBlock(15, 1, 1, block(BlockId::Stone));
     border.setBlock(16, 1, 1, block(BlockId::Stone));
-    assert(quadCount(ChunkMesher::build(border, 0, 0, 0)[0]) == 5);
-    assert(quadCount(ChunkMesher::build(border, 1, 0, 0)[0]) == 5);
+    assert(quadCount(ChunkMesher::build(border, 0, 0, 0, renderResources())[0]) == 5);
+    assert(quadCount(ChunkMesher::build(border, 1, 0, 0, renderResources())[0]) == 5);
 
     World glass;
     glass.setBlock(1, 1, 1, block(BlockId::Glass));
     glass.setBlock(2, 1, 1, block(BlockId::Glass));
-    assert(quadCount(ChunkMesher::build(glass, 0, 0, 0)[2]) == 10);
+    assert(quadCount(ChunkMesher::build(glass, 0, 0, 0, renderResources())[static_cast<std::size_t>(RenderLayer::Cutout)]) == 10);
 
     World leaves;
     leaves.setBlock(1, 1, 1, block(BlockId::Leaves));
     leaves.setBlock(2, 1, 1, block(BlockId::Leaves));
-    assert(BlockRegistry::get(block(BlockId::Leaves)).layer == RenderLayer::Cutout);
+    assert(BlockRegistry::get(block(BlockId::Leaves)).layer == RenderLayer::CutoutMipped);
     assert(!BlockRegistry::get(block(BlockId::Leaves)).opaque);
     // Fancy leaves render the shared leaf/leaf faces, unlike Fast mode.
-    assert(quadCount(ChunkMesher::build(leaves, 0, 0, 0)[1]) == 12);
+    assert(quadCount(ChunkMesher::build(leaves, 0, 0, 0, renderResources())[static_cast<std::size_t>(RenderLayer::CutoutMipped)]) == 12);
 
     const SectionSnapshot snapshot = ChunkMesher::capture(leaves, 0, 0, 0);
-    const SectionMeshData snapshotMesh = ChunkMesher::build(snapshot);
-    const SectionMeshData worldMesh = ChunkMesher::build(leaves, 0, 0, 0);
+    const SectionMeshData snapshotMesh = ChunkMesher::build(snapshot, renderResources());
+    const SectionMeshData worldMesh = ChunkMesher::build(leaves, 0, 0, 0, renderResources());
     for (std::size_t layer = 0; layer < snapshotMesh.size(); ++layer) {
         assert(snapshotMesh[layer].vertices.size() == worldMesh[layer].vertices.size());
         assert(snapshotMesh[layer].indices == worldMesh[layer].indices);
@@ -152,22 +159,107 @@ void testMeshing() {
 
     World generatedModels;
     generatedModels.setBlock(1, 1, 1, block(BlockId::TallGrass, 1));
-    assert(quadCount(ChunkMesher::build(generatedModels, 0, 0, 0)[1]) == 4);
+    assert(quadCount(ChunkMesher::build(generatedModels, 0, 0, 0, renderResources())[static_cast<std::size_t>(RenderLayer::Cutout)]) == 4);
     generatedModels.setBlock(1, 1, 1, block(BlockId::SnowLayer, 3));
-    assert(quadCount(ChunkMesher::build(generatedModels, 0, 0, 0)[1]) == 6);
+    assert(quadCount(ChunkMesher::build(generatedModels, 0, 0, 0, renderResources())[static_cast<std::size_t>(RenderLayer::Cutout)]) == 6);
     generatedModels.setBlock(1, 1, 1, block(BlockId::Cactus));
-    assert(quadCount(ChunkMesher::build(generatedModels, 0, 0, 0)[1]) == 6);
+    assert(quadCount(ChunkMesher::build(generatedModels, 0, 0, 0, renderResources())[static_cast<std::size_t>(RenderLayer::Cutout)]) == 6);
     generatedModels.setBlock(1, 1, 1, block(BlockId::Vine, 1));
-    assert(quadCount(ChunkMesher::build(generatedModels, 0, 0, 0)[1]) == 2);
+    assert(quadCount(ChunkMesher::build(generatedModels, 0, 0, 0, renderResources())[static_cast<std::size_t>(RenderLayer::Cutout)]) == 2);
     // BlockVine metadata: south=1, west=2, north=4, east=8. Each attached
     // side is a two-sided plane in the 1.12.2 baked model.
     generatedModels.setBlock(1, 1, 1, block(BlockId::Vine, 3));
-    assert(quadCount(ChunkMesher::build(generatedModels, 0, 0, 0)[1]) == 4);
+    assert(quadCount(ChunkMesher::build(generatedModels, 0, 0, 0, renderResources())[static_cast<std::size_t>(RenderLayer::Cutout)]) == 4);
     generatedModels.setBlock(1, 1, 1, block(BlockId::Vine, 15));
-    assert(quadCount(ChunkMesher::build(generatedModels, 0, 0, 0)[1]) == 8);
+    assert(quadCount(ChunkMesher::build(generatedModels, 0, 0, 0, renderResources())[static_cast<std::size_t>(RenderLayer::Cutout)]) == 8);
     generatedModels.setBlock(1, 1, 1, block(BlockId::DoublePlant, 2));
     generatedModels.setBlock(1, 2, 1, block(BlockId::DoublePlant, 8));
-    assert(quadCount(ChunkMesher::build(generatedModels, 0, 0, 0)[1]) == 8);
+    assert(quadCount(ChunkMesher::build(generatedModels, 0, 0, 0, renderResources())[static_cast<std::size_t>(RenderLayer::Cutout)]) == 8);
+}
+
+void testStage2RenderingCoverage() {
+    const BlockModelManager& models = renderResources().models();
+    const auto air = [](int, int, int) { return makeBlockState(0); };
+    const auto builtIn = [](BlockId id) {
+        switch (id) {
+            case BlockId::Air:
+            case BlockId::FlowingWater: case BlockId::Water:
+            case BlockId::FlowingLava: case BlockId::Lava:
+            case BlockId::Bed: case BlockId::PistonExtension:
+            case BlockId::Chest: case BlockId::StandingSign: case BlockId::WallSign:
+            case BlockId::EndPortal: case BlockId::EnderChest: case BlockId::Skull:
+            case BlockId::TrappedChest: case BlockId::Barrier:
+            case BlockId::StandingBanner: case BlockId::WallBanner:
+            case BlockId::EndGateway: case BlockId::StructureVoid:
+            case BlockId::WhiteShulkerBox: case BlockId::OrangeShulkerBox:
+            case BlockId::MagentaShulkerBox: case BlockId::LightBlueShulkerBox:
+            case BlockId::YellowShulkerBox: case BlockId::LimeShulkerBox:
+            case BlockId::PinkShulkerBox: case BlockId::GrayShulkerBox:
+            case BlockId::SilverShulkerBox: case BlockId::CyanShulkerBox:
+            case BlockId::PurpleShulkerBox: case BlockId::BlueShulkerBox:
+            case BlockId::BrownShulkerBox: case BlockId::GreenShulkerBox:
+            case BlockId::RedShulkerBox: case BlockId::BlackShulkerBox:
+                return true;
+            default: return false;
+        }
+    };
+
+    int modelBacked = 0;
+    for (std::uint16_t numericId = 0; numericId < 256; ++numericId) {
+        if (!BlockRegistry::isRegisteredId(numericId)) continue;
+        const auto id = static_cast<BlockId>(numericId);
+        if (builtIn(id)) continue;
+        bool selected = false;
+        for (std::uint8_t meta = 0; meta < 16 && !selected; ++meta) {
+            const BlockState state = makeBlockState(numericId, meta);
+            const BlockModelState modelState = resolveBlockModelState(state, air);
+            if (!models.hasBlockState(modelState.resourceName)) continue;
+            selected = !models.select(modelState, 0).empty();
+        }
+        assert(selected);
+        ++modelBacked;
+    }
+    // 254 registered IDs - 35 vanilla built-in/custom renderer IDs.
+    assert(modelBacked == 219);
+}
+
+void testFluidRendering() {
+    World waterWorld;
+    waterWorld.setBlock(1, 1, 1, block(BlockId::Water, 0));
+    const SectionMeshData waterMesh = ChunkMesher::build(waterWorld, 0, 0, 0, renderResources());
+    const MeshData& translucent = waterMesh[static_cast<std::size_t>(RenderLayer::Translucent)];
+    assert(!translucent.indices.empty());
+    assert(waterMesh[static_cast<std::size_t>(RenderLayer::Solid)].indices.empty());
+    bool hasPartialTop = false;
+    for (const MeshVertex& vertex : translucent.vertices) {
+        assert(std::isfinite(vertex.y));
+        if (vertex.y > 1.0F && vertex.y < 2.0F) hasPartialTop = true;
+    }
+    assert(hasPartialTop);
+
+    World lavaWorld;
+    lavaWorld.setBlock(1, 1, 1, block(BlockId::Lava, 0));
+    const SectionMeshData lavaMesh = ChunkMesher::build(lavaWorld, 0, 0, 0, renderResources());
+    assert(!lavaMesh[static_cast<std::size_t>(RenderLayer::Solid)].indices.empty());
+    assert(lavaMesh[static_cast<std::size_t>(RenderLayer::Translucent)].indices.empty());
+    assert(BlockRegistry::get(block(BlockId::Water)).layer == RenderLayer::Translucent);
+    assert(BlockRegistry::get(block(BlockId::Lava)).layer == RenderLayer::Solid);
+}
+
+void testPartialModelAo() {
+    World world;
+    world.setBlock(1, 1, 1, block(BlockId::StoneSlab, 0));
+    world.setBlock(0, 1, 1, block(BlockId::Stone));
+    world.setBlock(1, 1, 0, block(BlockId::Stone));
+    const SectionMeshData mesh = ChunkMesher::build(world, 0, 0, 0, renderResources());
+    const MeshData& solid = mesh[static_cast<std::size_t>(RenderLayer::Solid)];
+    assert(!solid.vertices.empty());
+    for (const MeshVertex& vertex : solid.vertices) {
+        assert(std::isfinite(vertex.shade));
+        assert(vertex.shade >= 0.0F && vertex.shade <= 1.0F);
+        assert(std::isfinite(vertex.skyLight));
+        assert(std::isfinite(vertex.blockLight));
+    }
 }
 
 void testMeshingSnapshotHalo() {
@@ -183,7 +275,7 @@ void testMeshingSnapshotHalo() {
     for (const auto& position : corners)
         world.setBlock(position[0], position[1], position[2], block(BlockId::Stone));
 
-    const SectionMeshData mesh = ChunkMesher::build(world, 0, 0, 0);
+    const SectionMeshData mesh = ChunkMesher::build(world, 0, 0, 0, renderResources());
     assert(!mesh[0].indices.empty());
 }
 
@@ -242,13 +334,37 @@ void testThreadedPrefetchCaching() {
 }
 
 void testAtlasInsetAndGenerator() {
-    const AtlasBounds first = atlasBounds(TextureId::Stone);
-    const float expectedU = static_cast<float>(atlasBorderPixels) /
-        static_cast<float>(atlasColumns * atlasTilePixels) + atlasInset;
-    const float expectedV = static_cast<float>(atlasBorderPixels) /
-        static_cast<float>(atlasRows * atlasTilePixels) + atlasInset;
-    assert(first.u0 == expectedU);
-    assert(first.v0 == expectedV);
+    const TextureAtlasData& atlas = renderResources().atlas();
+    const AtlasSprite& stone = atlas.sprite("minecraft:blocks/stone");
+    assert(stone.width == 16 && stone.height == 16);
+    const float rawU = static_cast<float>(stone.originX) / static_cast<float>(atlas.width());
+    const float rawV = static_cast<float>(stone.originY) / static_cast<float>(atlas.height());
+    assert(std::abs(stone.bounds.u0 - rawU - TextureAtlasData::uvInset) < 0.0000001F);
+    assert(std::abs(stone.bounds.v0 - rawV - TextureAtlasData::uvInset) < 0.0000001F);
+    assert(stone.bounds.u(0.0) == stone.bounds.u0);
+    assert(stone.bounds.u(16.0) == stone.bounds.u1);
+    const AtlasSprite& water = atlas.sprite("minecraft:blocks/water_still");
+    const AtlasSprite& lava = atlas.sprite("minecraft:blocks/lava_still");
+    assert(water.frames.size() > 1 && water.animation.size() > 1);
+    assert(lava.frames.size() > 1 && lava.animation.size() > 1);
+
+    const BlockModelManager& models = renderResources().models();
+    assert(models.hasBlockState("stone"));
+    const auto stoneModels = models.select({"stone", {}, {}}, 0);
+    assert(stoneModels.size() == 1 && stoneModels.front()->quads.size() == 6);
+
+    BlockModelState fenceState{"fence", {
+        {"north", "false"}, {"east", "false"},
+        {"south", "false"}, {"west", "false"}
+    }, {}};
+    const auto fencePost = models.select(fenceState, 0);
+    std::size_t fencePostQuads = 0;
+    for (const BakedBlockModel* model : fencePost) fencePostQuads += model->quads.size();
+    fenceState.properties["north"] = "true";
+    const auto fenceNorth = models.select(fenceState, 0);
+    std::size_t fenceNorthQuads = 0;
+    for (const BakedBlockModel* model : fenceNorth) fenceNorthQuads += model->quads.size();
+    assert(fenceNorthQuads > fencePostQuads);
     WorldConfig flat;
     flat.seed = 1;
     flat.worldType = WorldType::Flat;
@@ -490,6 +606,9 @@ int main() {
     testSynchronousEditLighting();
     testNegativeCoordinates();
     testMeshing();
+    testStage2RenderingCoverage();
+    testFluidRendering();
+    testPartialModelAo();
     testMeshingSnapshotHalo();
     testWorldChunkTransfer();
     testThreadPool();

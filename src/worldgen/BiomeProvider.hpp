@@ -13,6 +13,7 @@ struct BiomeDefinition {
     float temperature;
     float rainfall;
     bool snowy;
+    std::uint32_t waterColor;
 };
 
 class BiomeProvider {

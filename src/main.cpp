@@ -22,6 +22,7 @@
 #include "player/Player.hpp"
 #include "rendering/DebugRenderer.hpp"
 #include "rendering/BiomeColors.hpp"
+#include "rendering/BlockRenderResources.hpp"
 #include "rendering/EnvironmentRenderer.hpp"
 #include "rendering/TextureAtlas.hpp"
 #include "rendering/WorldRenderer.hpp"
@@ -173,8 +174,9 @@ int main() {
             static_cast<void>(chunkKey);
             lightingEngine.chunkLoaded(chunk->x(), chunk->z());
         }
-        TextureAtlas atlas;
-        WorldRenderer worldRenderer(world, atlas, chunkStreamer.workers());
+        BlockRenderResources blockRenderResources(BLOCKCRAFT_ASSET_ROOT);
+        TextureAtlas atlas(blockRenderResources.atlas());
+        WorldRenderer worldRenderer(world, atlas, blockRenderResources, chunkStreamer.workers());
         Environment environment(config);
         EnvironmentRenderer environmentRenderer(environment);
         DebugRenderer debugRenderer;

@@ -138,6 +138,7 @@ if(NOT asset_result EQUAL 0)
 endif()
 
 set(BLOCKCRAFT_CORE_SOURCES
+    src/core/Json.cpp
     src/core/ThreadPool.cpp
     src/environment/Environment.cpp
     src/blocks/BlockRegistry.cpp
@@ -147,6 +148,9 @@ set(BLOCKCRAFT_CORE_SOURCES
     src/world/Chunk.cpp
     src/world/World.cpp
     src/rendering/ChunkMesher.cpp
+    src/rendering/TextureAtlasData.cpp
+    src/rendering/ModelLoader.cpp
+    src/rendering/BlockStateModelMap.cpp
     src/rendering/CloudGeometry.cpp
     src/rendering/ImageLoader.cpp
     src/rendering/BiomeColors.cpp

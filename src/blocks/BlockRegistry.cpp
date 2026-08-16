@@ -372,17 +372,17 @@ std::array<BlockDefinition, 256> makeDefinitions() {
     set(BlockId::Bedrock, {"bedrock", RenderLayer::Solid, true, true, -1.0F, true, 255, 0, all(T::Bedrock)});
     set(BlockId::FlowingWater, {"flowing_water", RenderLayer::Translucent, false, true, 100.0F, false, 3, 0, all(T::WaterStill)});
     set(BlockId::Water, {"water", RenderLayer::Translucent, false, true, 100.0F, false, 3, 0, all(T::WaterStill)});
-    set(BlockId::FlowingLava, {"flowing_lava", RenderLayer::Translucent, false, true, 100.0F, false, 0, 15, all(T::LavaStill)});
-    set(BlockId::Lava, {"lava", RenderLayer::Translucent, false, true, 100.0F, false, 0, 15, all(T::LavaStill)});
+    set(BlockId::FlowingLava, {"flowing_lava", RenderLayer::Solid, false, true, 100.0F, false, 0, 15, all(T::LavaStill)});
+    set(BlockId::Lava, {"lava", RenderLayer::Solid, false, true, 100.0F, false, 0, 15, all(T::LavaStill)});
     set(BlockId::Sand, {"sand", RenderLayer::Solid, true, true, 0.5F, false, 255, 0, all(T::Sand)});
     set(BlockId::Gravel, {"gravel", RenderLayer::Solid, true, true, 0.6F, false, 255, 0, all(T::Gravel)});
     set(BlockId::GoldOre, {"gold_ore", RenderLayer::Solid, true, true, 3.0F, true, 255, 0, all(T::GoldOre)});
     set(BlockId::IronOre, {"iron_ore", RenderLayer::Solid, true, true, 3.0F, true, 255, 0, all(T::IronOre)});
     set(BlockId::CoalOre, {"coal_ore", RenderLayer::Solid, true, true, 3.0F, true, 255, 0, all(T::CoalOre)});
     set(BlockId::Log, {"log", RenderLayer::Solid, true, true, 2.0F, false, 255, 0, verticalLogTextures});
-    set(BlockId::Leaves, {"leaves", RenderLayer::Cutout, false, true, 0.2F, false, 1, 0, all(T::LeavesOak)});
+    set(BlockId::Leaves, {"leaves", RenderLayer::CutoutMipped, false, true, 0.2F, false, 1, 0, all(T::LeavesOak)});
     set(BlockId::Sponge, {"sponge", RenderLayer::Solid, true, true, 0.6F, false, 255, 0, all(T::SpongeWet)});
-    set(BlockId::Glass, {"glass", RenderLayer::Translucent, false, true, 0.3F, false, 0, 0, all(T::Glass)});
+    set(BlockId::Glass, {"glass", RenderLayer::Cutout, false, true, 0.3F, false, 0, 0, all(T::Glass)});
     set(BlockId::LapisOre, {"lapis_ore", RenderLayer::Solid, true, true, 3.0F, true, 255, 0, all(T::LapisOre)});
     set(BlockId::Sandstone, {"sandstone", RenderLayer::Solid, true, true, 0.8F, true, 255, 0, sandstoneTextures});
     set(BlockId::Web, {"web", RenderLayer::Cutout, false, false, 4.0F, false, 1, 0, all(T::Web), BlockShape::Cross});
@@ -421,14 +421,14 @@ std::array<BlockDefinition, 256> makeDefinitions() {
     set(BlockId::Waterlily, {"waterlily", RenderLayer::Cutout, false, false, 0.0F, false, 0, 0, all(T::Waterlily), BlockShape::Flat});
     set(BlockId::EmeraldOre, {"emerald_ore", RenderLayer::Solid, true, true, 3.0F, true, 255, 0, all(T::EmeraldOre)});
     set(BlockId::StainedHardenedClay, {"stained_hardened_clay", RenderLayer::Solid, true, true, 1.25F, true, 255, 0, all(T::StainedWhite)});
-    set(BlockId::Leaves2, {"leaves2", RenderLayer::Cutout, false, true, 0.2F, false, 1, 0, all(T::LeavesAcacia)});
+    set(BlockId::Leaves2, {"leaves2", RenderLayer::CutoutMipped, false, true, 0.2F, false, 1, 0, all(T::LeavesAcacia)});
     set(BlockId::Log2, {"log2", RenderLayer::Solid, true, true, 2.0F, false, 255, 0, all(T::LogAcacia)});
     set(BlockId::Barrier, {"barrier", RenderLayer::Solid, false, false, -1.0F, false, 0, 0, all(T::Stone)});
     set(BlockId::Prismarine, {"prismarine", RenderLayer::Solid, true, true, 1.5F, true, 255, 0, all(T::Prismarine)});
     set(BlockId::SeaLantern, {"sea_lantern", RenderLayer::Solid, true, true, 0.3F, false, 255, 15, all(T::SeaLantern)});
     set(BlockId::Carpet, {"carpet", RenderLayer::Solid, true, true, 2.0F, false, 255, 0, all(T::PlanksTextureFallback)});
     set(BlockId::HardenedClay, {"hardened_clay", RenderLayer::Solid, true, true, 1.25F, true, 255, 0, all(T::HardenedClay)});
-    set(BlockId::PackedIce, {"packed_ice", RenderLayer::Translucent, false, true, 0.5F, false, 3, 0, all(T::Ice)});
+    set(BlockId::PackedIce, {"packed_ice", RenderLayer::Solid, true, true, 0.5F, false, 255, 0, all(T::Ice)});
     set(BlockId::DoublePlant, {"double_plant", RenderLayer::Cutout, false, false, 0.0F, false, 0, 0, all(T::TallGrass), BlockShape::Cross});
     set(BlockId::RedSandstone, {"red_sandstone", RenderLayer::Solid, true, true, 0.8F, true, 255, 0, redSandstoneTextures});
     set(BlockId::BoneBlock, {"bone_block", RenderLayer::Solid, true, true, 2.0F, true, 255, 0, boneTextures});
@@ -445,6 +445,20 @@ std::array<BlockDefinition, 256> makeDefinitions() {
         BlockId::GlassPane, BlockId::TripwireHook, BlockId::Tripwire,
         BlockId::FlowerPot, BlockId::WoodenButton, BlockId::Cocoa
     }) setGeneratedCross(id);
+
+    // Rendering-parity overrides. `fullCube` is retained for blocks such as
+    // glass where the current engine also uses it for collision; model geometry
+    // itself now comes from the vanilla JSON resources.
+    set(BlockId::StainedGlass, {"stained_glass", RenderLayer::Translucent, false, true,
+        0.3F, false, 0, 0, all(T::Glass)});
+    set(BlockId::GlassPane, {"glass_pane", RenderLayer::CutoutMipped, false, false,
+        0.3F, false, 0, 0, all(T::Glass)});
+    set(BlockId::StainedGlassPane, {"stained_glass_pane", RenderLayer::Translucent, false, false,
+        0.3F, false, 0, 0, all(T::Glass)});
+    set(BlockId::IronBars, {"iron_bars", RenderLayer::CutoutMipped, false, false,
+        5.0F, true, 0, 0, all(T::Stone)});
+    set(BlockId::Portal, {"portal", RenderLayer::Translucent, false, false,
+        -1.0F, false, 0, 11, all(T::Stone)});
 
     for (BlockId id : {
         BlockId::StoneSlab, BlockId::DoubleStoneSlab, BlockId::Dispenser,
@@ -479,6 +493,45 @@ std::array<BlockDefinition, 256> makeDefinitions() {
     set(BlockId::Magma, {"magma", RenderLayer::Solid, true, true, 0.5F, false, 255, 3, all(T::Stone)});
     set(BlockId::Concrete, {"concrete", RenderLayer::Solid, true, true, 1.8F, true, 255, 0, all(T::Stone)});
     set(BlockId::ConcretePowder, {"concrete_powder", RenderLayer::Solid, true, true, 0.5F, false, 255, 0, all(T::Stone)});
+
+    // Vanilla render-layer and occlusion overrides for JSON-model blocks.
+    const auto renderTraits = [&](BlockId id, RenderLayer layer, bool opaque) {
+        BlockDefinition& definition = definitions[static_cast<std::size_t>(id)];
+        definition.layer = layer;
+        definition.opaque = opaque;
+    };
+    for (BlockId id : {
+        BlockId::Torch, BlockId::Fire, BlockId::Web, BlockId::TallGrass, BlockId::DeadBush,
+        BlockId::YellowFlower, BlockId::RedFlower, BlockId::BrownMushroom, BlockId::RedMushroom,
+        BlockId::Wheat, BlockId::Carrots, BlockId::Potatoes, BlockId::Beetroots, BlockId::Reeds,
+        BlockId::Vine, BlockId::Waterlily, BlockId::Ladder, BlockId::Rail, BlockId::GoldenRail,
+        BlockId::DetectorRail, BlockId::ActivatorRail, BlockId::RedstoneWire, BlockId::Lever,
+        BlockId::UnlitRedstoneTorch, BlockId::RedstoneTorch, BlockId::StoneButton, BlockId::WoodenButton,
+        BlockId::WoodenDoor, BlockId::IronDoor, BlockId::SpruceDoor, BlockId::BirchDoor,
+        BlockId::JungleDoor, BlockId::AcaciaDoor, BlockId::DarkOakDoor, BlockId::Trapdoor,
+        BlockId::IronTrapdoor, BlockId::Cocoa, BlockId::UnpoweredRepeater, BlockId::PoweredRepeater,
+        BlockId::UnpoweredComparator, BlockId::PoweredComparator
+    }) renderTraits(id, RenderLayer::Cutout, false);
+    for (BlockId id : {BlockId::Leaves, BlockId::Leaves2, BlockId::GlassPane, BlockId::IronBars,
+                       BlockId::TripwireHook})
+        renderTraits(id, RenderLayer::CutoutMipped, false);
+    renderTraits(BlockId::StainedGlassPane, RenderLayer::Translucent, false);
+    renderTraits(BlockId::Tripwire, RenderLayer::Translucent, false);
+
+    for (BlockId id : {
+        BlockId::OakStairs, BlockId::StoneStairs, BlockId::BrickStairs, BlockId::StoneBrickStairs,
+        BlockId::NetherBrickStairs, BlockId::SandstoneStairs, BlockId::SpruceStairs,
+        BlockId::BirchStairs, BlockId::JungleStairs, BlockId::QuartzStairs, BlockId::AcaciaStairs,
+        BlockId::DarkOakStairs, BlockId::RedSandstoneStairs, BlockId::PurpurStairs,
+        BlockId::StoneSlab, BlockId::WoodenSlab, BlockId::StoneSlab2, BlockId::PurpurSlab,
+        BlockId::Fence, BlockId::SpruceFence, BlockId::BirchFence, BlockId::JungleFence,
+        BlockId::DarkOakFence, BlockId::AcaciaFence, BlockId::NetherBrickFence,
+        BlockId::FenceGate, BlockId::SpruceFenceGate, BlockId::BirchFenceGate,
+        BlockId::JungleFenceGate, BlockId::DarkOakFenceGate, BlockId::AcaciaFenceGate,
+        BlockId::CobblestoneWall, BlockId::Cauldron, BlockId::BrewingStand, BlockId::EndPortalFrame,
+        BlockId::Cake, BlockId::Anvil, BlockId::Hopper, BlockId::PistonHead, BlockId::EndRod,
+        BlockId::ChorusPlant, BlockId::ChorusFlower
+    }) definitions[static_cast<std::size_t>(id)].opaque = false;
 
     return definitions;
 }

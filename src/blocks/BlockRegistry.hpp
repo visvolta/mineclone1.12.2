@@ -272,7 +272,7 @@ enum class BlockId : std::uint16_t {
 };
 
 enum class Face : std::uint8_t { Down, Up, North, South, West, East };
-enum class RenderLayer : std::uint8_t { Solid, Cutout, Translucent };
+enum class RenderLayer : std::uint8_t { Solid, CutoutMipped, Cutout, Translucent, Count };
 enum class BlockShape : std::uint8_t { Cube, Cross, Vine, Flat, SnowLayer, Cactus };
 
 enum class TextureId : std::uint8_t {
