@@ -23,6 +23,7 @@ public:
     FrontEnd& operator=(const FrontEnd&) = delete;
 
     [[nodiscard]] std::optional<std::filesystem::path> run();
+    void showLoading(std::string_view title, std::string_view message, int progress = -1);
 
 private:
     enum class Screen { Main, SelectWorld, CreateWorld, DeleteConfirm };
@@ -42,6 +43,9 @@ private:
                                  char* buffer, std::size_t capacity);
     void drawText(float x, float y, std::string_view text,
                   unsigned int argb = 0xFFFFFFFFU, bool centered = false) const;
+    void drawRotatedText(float originX, float originY, std::string_view text,
+                         float angleDegrees, float textScale,
+                         unsigned int argb = 0xFFFFFF00U) const;
     [[nodiscard]] float textWidth(std::string_view text) const;
     void drawTiledBackground(int width, int height) const;
     [[nodiscard]] std::string tr(std::string_view key, std::string fallback) const;
@@ -64,6 +68,7 @@ private:
     int activeTextField_ = -1;
     std::optional<std::filesystem::path> result_;
     bool quit_ = false;
+    bool moreWorldOptions_ = false;
 
     float uiScale_ = 1.0F;
     CreateWorldRequest create_{};
@@ -76,10 +81,12 @@ private:
     GLuint edition_ = 0;
     GLuint optionsBackground_ = 0;
     GLuint worldSelection_ = 0;
+    GLuint unknownWorldIcon_ = 0;
     std::array<int, 256> charWidths_{};
     std::unordered_map<std::string, std::string> language_;
     std::vector<std::string> splashes_;
     std::string splash_;
+    float menuSeconds_ = 0.0F;
 
     GLuint panoramaProgram_ = 0;
     GLuint panoramaVao_ = 0;

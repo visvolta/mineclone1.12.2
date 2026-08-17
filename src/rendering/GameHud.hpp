@@ -48,6 +48,8 @@ public:
     void closeBlockEntityScreen();
     [[nodiscard]] bool hasBlockEntityScreen() const { return activeBlockEntityAction_.has_value(); }
     bool consumeScreenCloseRequest() { const bool value=screenCloseRequested_; screenCloseRequested_=false; return value; }
+    bool consumeResumeRequest() { const bool value=resumeRequested_; resumeRequested_=false; return value; }
+    bool consumeReturnToTitleRequest() { const bool value=returnToTitleRequested_; returnToTitleRequested_=false; return value; }
     [[nodiscard]] bool capturesTextInput() const { return searchFocused_ || (activeBlockEntityAction_ && activeBlockEntityAction_->type == BlockEntityActionType::EditSign); }
 
 private:
@@ -77,6 +79,9 @@ private:
     void renderBlockEntityScreen(const World& world, Player& player, int scaledWidth, int scaledHeight, int scaleFactor);
     void renderContainerScreen(const World& world, Player& player, int scaledWidth, int scaledHeight, int scaleFactor);
     void renderSignEditor(int scaledWidth, int scaledHeight, int scaleFactor);
+    void renderPauseMenu(int scaledWidth, int scaledHeight, int scaleFactor);
+    bool menuButton(int id, float x, float y, float width, std::string_view label,
+                    int scaleFactor, bool enabled = true);
     void renderDebug(const World& world, const Player& player, const Camera& camera,
                      const WorldConfig& config, const ChunkStreamer& streamer,
                      const LightingEngine& lighting, const WorldRenderer& renderer,
@@ -111,4 +116,6 @@ private:
     std::optional<BlockEntityAction> activeBlockEntityAction_;
     int signEditLine_ = 0;
     bool screenCloseRequested_ = false;
+    bool resumeRequested_ = false;
+    bool returnToTitleRequested_ = false;
 };

@@ -64,8 +64,23 @@ public:
         return {worldTime_, raining_, thundering_, rainTime_, thunderTime_, rainStrength_, thunderStrength_};
     }
     void restoreSaveState(const EnvironmentSaveState& state) {
-        worldTime_ = state.worldTime; raining_ = state.raining; thundering_ = state.thundering;
-        rainTime_ = state.rainTime; thunderTime_ = state.thunderTime;
+        worldTime_ = state.worldTime;
+        raining_ = state.raining;
+        thundering_ = state.thundering;
+
+        // WorldInfo may legitimately contain zero weather timers (notably a
+        // newly-created world). Vanilla treats zero as "choose the next
+        // duration for the current state", not "toggle weather immediately".
+        // The Stage 8 implementation restored zero directly and its pre-
+        // decrement update path could start a new world in rain/thunder on the
+        // first tick.
+        rainTime_ = state.rainTime > 0 ? state.rainTime :
+            (raining_ ? random_.nextInt(12000) + 12000
+                      : random_.nextInt(168000) + 12000);
+        thunderTime_ = state.thunderTime > 0 ? state.thunderTime :
+            (thundering_ ? random_.nextInt(12000) + 3600
+                         : random_.nextInt(168000) + 12000);
+
         previousRainStrength_ = rainStrength_ = state.rainStrength;
         previousThunderStrength_ = thunderStrength_ = state.thunderStrength;
     }

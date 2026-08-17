@@ -1112,6 +1112,67 @@ void GameHud::renderDebug(const World& world, const Player& player, const Camera
             2.0F + 9.0F * static_cast<float>(index), right[index], scaleFactor, true);
 }
 
+bool GameHud::menuButton(int id, float x, float y, float width, std::string_view label,
+                         int scaleFactor, bool enabled) {
+    const ImGuiIO& io = ImGui::GetIO();
+    const float sx = static_cast<float>(scaleFactor) /
+        std::max(io.DisplayFramebufferScale.x, 1.0e-6F);
+    const float sy = static_cast<float>(scaleFactor) /
+        std::max(io.DisplayFramebufferScale.y, 1.0e-6F);
+    ImGui::SetCursorScreenPos(ImVec2(x * sx, y * sy));
+    ImGui::PushID(id);
+    ImGui::InvisibleButton("##menu_button", ImVec2(width * sx, 20.0F * sy));
+    const bool hovered = enabled && ImGui::IsItemHovered();
+    const bool clicked = enabled && ImGui::IsItemClicked(ImGuiMouseButton_Left);
+    ImGui::PopID();
+
+    ImDrawList* draw = ImGui::GetBackgroundDrawList();
+    const float v = (enabled ? (hovered ? 86.0F : 66.0F) : 46.0F) / 256.0F;
+    const float half = width * 0.5F;
+    const ImU32 tint = enabled ? IM_COL32_WHITE : IM_COL32(160,160,160,255);
+    draw->AddImage(textureId(widgetsTexture_), ImVec2(x*sx,y*sy),
+                   ImVec2((x+half)*sx,(y+20.0F)*sy),
+                   ImVec2(0.0F,v), ImVec2(100.0F/256.0F,v+20.0F/256.0F), tint);
+    draw->AddImage(textureId(widgetsTexture_), ImVec2((x+half)*sx,y*sy),
+                   ImVec2((x+width)*sx,(y+20.0F)*sy),
+                   ImVec2((200.0F-half)/256.0F,v),
+                   ImVec2(200.0F/256.0F,v+20.0F/256.0F), tint);
+    const float textX = x + width*0.5F - textWidth(label)*0.5F;
+    drawText(textX, y+6.0F, label, scaleFactor, false,
+             enabled ? (hovered ? 0xFFFFFFA0U : 0xFFFFFFFFU) : 0xFFA0A0A0U);
+    return clicked;
+}
+
+void GameHud::renderPauseMenu(int scaledWidth, int scaledHeight, int scaleFactor) {
+    const ImGuiIO& io = ImGui::GetIO();
+    const float sx = static_cast<float>(scaleFactor) /
+        std::max(io.DisplayFramebufferScale.x, 1.0e-6F);
+    const float sy = static_cast<float>(scaleFactor) /
+        std::max(io.DisplayFramebufferScale.y, 1.0e-6F);
+    ImDrawList* draw = ImGui::GetBackgroundDrawList();
+    // GuiScreen#drawDefaultBackground while a world is loaded: dark gradient
+    // over the paused scene, not the options-background texture.
+    draw->AddRectFilledMultiColor(ImVec2(0,0),
+        ImVec2(static_cast<float>(scaledWidth)*sx, static_cast<float>(scaledHeight)*sy),
+        IM_COL32(0,0,0,112), IM_COL32(0,0,0,112),
+        IM_COL32(0,0,0,176), IM_COL32(0,0,0,176));
+
+    drawText(static_cast<float>(scaledWidth)*0.5F - textWidth("Game menu")*0.5F,
+             40.0F, "Game menu", scaleFactor, false, 0xFFFFFFFFU);
+
+    const float center = static_cast<float>(scaledWidth)*0.5F;
+    const float base = static_cast<float>(scaledHeight)/4.0F - 16.0F;
+    if (menuButton(400, center-100.0F, base+24.0F, 200.0F, "Back to Game", scaleFactor))
+        resumeRequested_ = true;
+    menuButton(401, center-100.0F, base+48.0F, 98.0F, "Advancements", scaleFactor, false);
+    menuButton(402, center+2.0F, base+48.0F, 98.0F, "Statistics", scaleFactor, false);
+    menuButton(403, center-100.0F, base+96.0F, 98.0F, "Options...", scaleFactor, false);
+    menuButton(404, center+2.0F, base+96.0F, 98.0F, "Open to LAN", scaleFactor, false);
+    if (menuButton(405, center-100.0F, base+120.0F, 200.0F,
+                   "Save and Quit to Title", scaleFactor))
+        returnToTitleRequested_ = true;
+}
+
 void GameHud::render(const World& world, Player& player, const Camera& camera,
                      const WorldConfig& config, const ChunkStreamer& streamer,
                      const LightingEngine& lighting, const WorldRenderer& renderer,
@@ -1132,12 +1193,8 @@ void GameHud::render(const World& world, Player& player, const Camera& camera,
             renderInventory(player, player.gameMode() == GameMode::Creative,
                             scaled.scaledWidth, scaled.scaledHeight, scaled.scaleFactor);
     }
-    if (paused && !inventoryOpen) {
-        const std::string label = "Paused";
-        drawText(static_cast<float>(scaled.scaledWidth) * 0.5F - textWidth(label) * 0.5F,
-                 static_cast<float>(scaled.scaledHeight) * 0.5F - 4.0F,
-                 label, scaled.scaleFactor, false);
-    }
+    if (paused && !inventoryOpen)
+        renderPauseMenu(scaled.scaledWidth, scaled.scaledHeight, scaled.scaleFactor);
 }
 
 void GameHud::endFrame() {

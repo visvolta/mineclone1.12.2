@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
@@ -26,7 +27,8 @@ public:
     ChunkStreamer(const ChunkStreamer&) = delete;
     ChunkStreamer& operator=(const ChunkStreamer&) = delete;
 
-    void prime(double playerX, double playerZ, int radius);
+    void prime(double playerX, double playerZ, int radius,
+               const std::function<void(float)>& progress = {});
     [[nodiscard]] ChunkStreamChanges update(double playerX, double playerZ,
                                             float forwardX, float forwardZ,
                                             double budgetMilliseconds);

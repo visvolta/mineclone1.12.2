@@ -126,7 +126,11 @@ FrontEnd::FrontEnd(GLFWwindow* window, const std::filesystem::path& assetRoot,
     title_ = loadTexture(assetRoot_ / "assets/minecraft/textures/gui/title/minecraft.png", 256, 256);
     edition_ = loadTexture(assetRoot_ / "assets/minecraft/textures/gui/title/edition.png", 128, 16);
     optionsBackground_ = loadTexture(assetRoot_ / "assets/minecraft/textures/gui/options_background.png", 16, 16);
+    glBindTexture(GL_TEXTURE_2D, optionsBackground_);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
     worldSelection_ = loadTexture(assetRoot_ / "assets/minecraft/textures/gui/world_selection.png", 256, 256);
+    unknownWorldIcon_ = loadTexture(assetRoot_ / "assets/minecraft/textures/misc/unknown_server.png", 128, 128);
 
     std::ifstream language(assetRoot_ / "assets/minecraft/lang/en_us.lang");
     std::string line;
@@ -154,6 +158,7 @@ FrontEnd::FrontEnd(GLFWwindow* window, const std::filesystem::path& assetRoot,
 
 FrontEnd::~FrontEnd() {
     destroyPanorama();
+    if (unknownWorldIcon_) glDeleteTextures(1, &unknownWorldIcon_);
     if (worldSelection_) glDeleteTextures(1, &worldSelection_);
     if (optionsBackground_) glDeleteTextures(1, &optionsBackground_);
     if (edition_) glDeleteTextures(1, &edition_);
@@ -236,6 +241,43 @@ void FrontEnd::drawText(float x, float y, std::string_view text,
     }
 }
 
+void FrontEnd::drawRotatedText(float originX, float originY, std::string_view text,
+                               float angleDegrees, float textScale,
+                               unsigned int color) const {
+    ImDrawList* draw = ImGui::GetForegroundDrawList();
+    const float angle = angleDegrees * 0.01745329251994329577F;
+    const float cs = std::cos(angle), sn = std::sin(angle);
+    const float width = textWidth(text);
+    float cursor = -width * 0.5F;
+    const auto transform = [&](float x, float y) {
+        const float sx = x * textScale;
+        const float sy = y * textScale;
+        return ImVec2(pixel(originX + sx * cs - sy * sn),
+                      pixel(originY + sx * sn + sy * cs));
+    };
+    const ImU32 tint = argb(color);
+    for (unsigned char character : text) {
+        const int advance = charWidths_[character];
+        if (character != ' ') {
+            const int glyphX = (character & 15) * 8;
+            const int glyphY = (character >> 4) * 8;
+            const int visible = std::clamp(advance - 1, 1, 8);
+            const ImVec2 uv0(static_cast<float>(glyphX) / 128.0F,
+                             static_cast<float>(glyphY) / 128.0F);
+            const ImVec2 uv1(static_cast<float>(glyphX + visible) / 128.0F,
+                             static_cast<float>(glyphY + 8) / 128.0F);
+            const ImVec2 p0 = transform(cursor, -8.0F);
+            const ImVec2 p1 = transform(cursor + visible, -8.0F);
+            const ImVec2 p2 = transform(cursor + visible, 0.0F);
+            const ImVec2 p3 = transform(cursor, 0.0F);
+            draw->AddImageQuad(textureId(ascii_), p0, p1, p2, p3,
+                               uv0, ImVec2(uv1.x, uv0.y), uv1,
+                               ImVec2(uv0.x, uv1.y), tint);
+        }
+        cursor += static_cast<float>(advance);
+    }
+}
+
 std::string FrontEnd::tr(std::string_view key, std::string fallback) const {
     const auto found = language_.find(std::string(key));
     return found == language_.end() ? fallback : found->second;
@@ -248,13 +290,19 @@ void FrontEnd::initPanorama() {
         "void main(){uv=p*0.5+0.5;gl_Position=vec4(p,0,1);}";
     const char* fragmentSource =
         "#version 330 core\n"
-        "in vec2 uv;out vec4 color;uniform samplerCube sky;uniform float yaw;uniform float pitch;uniform float aspect;"
-        "vec3 directionFor(vec2 sampleUv){vec2 q=sampleUv*2.0-1.0;q.x*=aspect;float f=tan(radians(60.0));"
-        "vec3 d=normalize(vec3(q.x*f,-q.y*f,1.0));float cy=cos(yaw),sy=sin(yaw);"
-        "d=vec3(cy*d.x+sy*d.z,d.y,-sy*d.x+cy*d.z);float cp=cos(pitch),sp=sin(pitch);"
+        "in vec2 uv;out vec4 color;uniform samplerCube sky;uniform float yaw;uniform float pitch;"
+        "uniform vec2 viewportScale;"
+        "vec3 directionFor(vec2 sampleUv){"
+        "vec2 q=(sampleUv*2.0-1.0)*viewportScale;"
+        "float f=tan(radians(60.0));"
+        "vec3 d=normalize(vec3(q.x*f,-q.y*f,1.0));"
+        "float cy=cos(yaw),sy=sin(yaw);"
+        "d=vec3(cy*d.x+sy*d.z,d.y,-sy*d.x+cy*d.z);"
+        "float cp=cos(pitch),sp=sin(pitch);"
         "return vec3(d.x,cp*d.y-sp*d.z,sp*d.y+cp*d.z);}"
         "void main(){vec3 sum=vec3(0.0);float weight=0.0;"
-        "for(int i=-3;i<=3;i++){float w=1.0/(1.0+abs(float(i)));sum+=texture(sky,directionFor(uv+vec2(float(i)/768.0,0))).rgb*w;weight+=w;}"
+        "for(int i=-3;i<=3;i++){float w=1.0/(1.0+abs(float(i)));"
+        "sum+=texture(sky,directionFor(uv+vec2(float(i)/768.0,0))).rgb*w;weight+=w;}"
         "color=vec4(sum/weight,1.0);}";
     panoramaProgram_ = linkProgram(compileShader(GL_VERTEX_SHADER, vertexSource),
                                    compileShader(GL_FRAGMENT_SHADER, fragmentSource));
@@ -272,7 +320,7 @@ void FrontEnd::initPanorama() {
     constexpr std::array<GLenum, 6> targets = {
         GL_TEXTURE_CUBE_MAP_POSITIVE_Z, GL_TEXTURE_CUBE_MAP_POSITIVE_X,
         GL_TEXTURE_CUBE_MAP_NEGATIVE_Z, GL_TEXTURE_CUBE_MAP_NEGATIVE_X,
-        GL_TEXTURE_CUBE_MAP_POSITIVE_Y, GL_TEXTURE_CUBE_MAP_NEGATIVE_Y
+        GL_TEXTURE_CUBE_MAP_NEGATIVE_Y, GL_TEXTURE_CUBE_MAP_POSITIVE_Y
     };
     for (int index = 0; index < 6; ++index) {
         const auto path = assetRoot_ / "assets/minecraft/textures/gui/title/background" /
@@ -282,6 +330,11 @@ void FrontEnd::initPanorama() {
         if (pixels == nullptr || width != 256 || height != 256) {
             if (pixels != nullptr) stbi_image_free(pixels);
             throw std::runtime_error("Invalid Minecraft panorama asset: " + path.string());
+        }
+        for (int y = 0; y < height / 2; ++y) {
+            unsigned char* top = pixels + static_cast<std::size_t>(y * width * 4);
+            unsigned char* bottom = pixels + static_cast<std::size_t>((height - 1 - y) * width * 4);
+            for (int x = 0; x < width * 4; ++x) std::swap(top[x], bottom[x]);
         }
         glTexImage2D(targets[static_cast<std::size_t>(index)], 0, GL_RGBA8,
                      width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
@@ -308,14 +361,15 @@ void FrontEnd::renderPanorama(float seconds, int width, int height) {
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_CUBE_MAP, panoramaCubemap_);
     glUniform1i(glGetUniformLocation(panoramaProgram_, "sky"), 0);
-    // GuiMainMenu: panoramaTimer advances at roughly 20 ticks/sec, yaw is
-    // -timer*0.1 degrees and pitch is sin(timer/400)*25+20 degrees.
+    const float timer = seconds * 20.0F;
     glUniform1f(glGetUniformLocation(panoramaProgram_, "yaw"),
-                (-seconds * 2.0F) * 0.01745329251994329577F);
+                (-timer * 0.1F) * 0.01745329251994329577F);
     glUniform1f(glGetUniformLocation(panoramaProgram_, "pitch"),
-                (20.0F + std::sin(seconds / 20.0F) * 25.0F) * 0.01745329251994329577F);
-    glUniform1f(glGetUniformLocation(panoramaProgram_, "aspect"),
-                height > 0 ? static_cast<float>(width) / static_cast<float>(height) : 1.0F);
+                (20.0F + std::sin(timer / 400.0F) * 25.0F) * 0.01745329251994329577F);
+    const float maximum = static_cast<float>(std::max(width, height));
+    const float sx = maximum > 0.0F ? static_cast<float>(width) / maximum : 1.0F;
+    const float sy = maximum > 0.0F ? static_cast<float>(height) / maximum : 1.0F;
+    glUniform2f(glGetUniformLocation(panoramaProgram_, "viewportScale"), sx, sy);
     glBindVertexArray(panoramaVao_);
     glDrawArrays(GL_TRIANGLES, 0, 3);
     glBindVertexArray(0);
@@ -401,22 +455,32 @@ bool FrontEnd::textField(int id, float x, float y, float width, char* buffer, st
 
 void FrontEnd::drawTiledBackground(int width, int height) const {
     ImDrawList* draw = ImGui::GetBackgroundDrawList();
-    for (int y = 0; y < height; y += 16) {
-        for (int x = 0; x < width; x += 16) {
-            draw->AddImage(textureId(optionsBackground_), ImVec2(pixel(static_cast<float>(x)), pixel(static_cast<float>(y))),
-                           ImVec2(pixel(static_cast<float>(x + 16)), pixel(static_cast<float>(y + 16))),
-                           ImVec2(0, 0), ImVec2(1, 1), IM_COL32(128, 128, 128, 255));
+    constexpr int tile = 32;
+    for (int y = 0; y < height; y += tile) {
+        for (int x = 0; x < width; x += tile) {
+            const int right = std::min(width, x + tile);
+            const int bottom = std::min(height, y + tile);
+            const float u1 = static_cast<float>(right - x) / 32.0F;
+            const float v1 = static_cast<float>(bottom - y) / 32.0F;
+            draw->AddImage(textureId(optionsBackground_),
+                ImVec2(pixel(static_cast<float>(x)), pixel(static_cast<float>(y))),
+                ImVec2(pixel(static_cast<float>(right)), pixel(static_cast<float>(bottom))),
+                ImVec2(0, 0), ImVec2(u1, v1), IM_COL32(64, 64, 64, 255));
         }
     }
-    draw->AddRectFilled(ImVec2(0, 0), ImVec2(pixel(static_cast<float>(width)), pixel(32.0F)), IM_COL32(0, 0, 0, 120));
-    draw->AddRectFilled(ImVec2(0, pixel(static_cast<float>(height - 64))),
-                        ImVec2(pixel(static_cast<float>(width)), pixel(static_cast<float>(height))), IM_COL32(0, 0, 0, 120));
 }
 
 void FrontEnd::renderMain(int width, int height) {
     ImDrawList* draw = ImGui::GetForegroundDrawList();
-    draw->AddRectFilled(ImVec2(0, 0), ImVec2(pixel(static_cast<float>(width)), pixel(static_cast<float>(height))),
-                        IM_COL32(0, 0, 0, 48));
+    // GuiMainMenu draws two full-screen gradients over the panorama.
+    draw->AddRectFilledMultiColor(ImVec2(0, 0),
+        ImVec2(pixel(static_cast<float>(width)), pixel(static_cast<float>(height))),
+        IM_COL32(255,255,255,128), IM_COL32(255,255,255,128),
+        IM_COL32(255,255,255,0), IM_COL32(255,255,255,0));
+    draw->AddRectFilledMultiColor(ImVec2(0, 0),
+        ImVec2(pixel(static_cast<float>(width)), pixel(static_cast<float>(height))),
+        IM_COL32(0,0,0,0), IM_COL32(0,0,0,0),
+        IM_COL32(0,0,0,128), IM_COL32(0,0,0,128));
     const float logoX = width * 0.5F - 137.0F;
     draw->AddImage(textureId(title_), ImVec2(pixel(logoX), pixel(30)), ImVec2(pixel(logoX + 155), pixel(74)),
                    ImVec2(0, 0), ImVec2(155.0F / 256.0F, 44.0F / 256.0F));
@@ -424,7 +488,11 @@ void FrontEnd::renderMain(int width, int height) {
                    ImVec2(0, 45.0F / 256.0F), ImVec2(155.0F / 256.0F, 89.0F / 256.0F));
     draw->AddImage(textureId(edition_), ImVec2(pixel(logoX + 88), pixel(67)), ImVec2(pixel(logoX + 186), pixel(81)),
                    ImVec2(0, 0), ImVec2(98.0F / 128.0F, 14.0F / 16.0F));
-    drawText(width * 0.5F + 90.0F, 72.0F, splash_, 0xFFFFFF00U, true);
+    const float pulse = 1.8F - std::abs(std::sin(std::fmod(menuSeconds_, 1.0F) *
+        6.2831853071795864769F) * 0.1F);
+    const float splashScale = pulse * 100.0F / (textWidth(splash_) + 32.0F);
+    drawRotatedText(width * 0.5F + 90.0F, 70.0F, splash_, -20.0F,
+                    splashScale, 0xFFFFFF00U);
 
     const float y = height / 4.0F + 48.0F;
     if (button(1, width * 0.5F - 100, y, 200, tr("menu.singleplayer", "Singleplayer"))) {
@@ -450,93 +518,174 @@ void FrontEnd::refreshWorlds() {
 
 void FrontEnd::renderWorldSelect(int width, int height) {
     drawTiledBackground(width, height);
-    drawText(width * 0.5F, 12, tr("selectWorld.title", "Select World"), 0xFFFFFFFFU, true);
-    const int top = 36;
-    const int bottom = height - 68;
-    const int visibleRows = std::max(1, (bottom - top) / 38);
+    drawText(width * 0.5F, 20, tr("selectWorld.title", "Select World"), 0xFFFFFFFFU, true);
+
+    const int top = 32;
+    const int bottom = height - 64;
+    constexpr int slotHeight = 36;
+    const int visibleRows = std::max(1, (bottom - top) / slotHeight);
     if (ImGui::GetIO().MouseWheel != 0.0F) {
         worldScroll_ -= static_cast<int>(ImGui::GetIO().MouseWheel);
         worldScroll_ = std::clamp(worldScroll_, 0,
             std::max(0, static_cast<int>(worlds_.size()) - visibleRows));
     }
 
+    // GuiListWorldSelection expands GuiSlot's normal list width by 50.
+    const float listWidth = 270.0F;
+    const float listLeft = width * 0.5F - listWidth * 0.5F;
     int y = top;
-    for (int row = 0; row < visibleRows; ++row, y += 38) {
+    for (int row = 0; row < visibleRows; ++row, y += slotHeight) {
         const int index = worldScroll_ + row;
         if (index >= static_cast<int>(worlds_.size())) break;
         const WorldSummary& world = worlds_[static_cast<std::size_t>(index)];
         const bool selected = index == selectedWorld_;
         ImDrawList* draw = ImGui::GetForegroundDrawList();
-        draw->AddRectFilled(ImVec2(pixel(width * 0.5F - 160), pixel(static_cast<float>(y))),
-                            ImVec2(pixel(width * 0.5F + 160), pixel(static_cast<float>(y + 36))),
-                            selected ? IM_COL32(96, 96, 96, 220) : IM_COL32(20, 20, 20, 150));
-        ImGui::SetCursorScreenPos(ImVec2(pixel(width * 0.5F - 160), pixel(static_cast<float>(y))));
+
+        ImGui::SetCursorScreenPos(ImVec2(pixel(listLeft), pixel(static_cast<float>(y))));
         ImGui::PushID(index);
-        ImGui::InvisibleButton("##world", ImVec2(pixel(320), pixel(36)));
-        if (ImGui::IsItemClicked()) {
-            if (selectedWorld_ == index && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) result_ = world.folder;
-            selectedWorld_ = index;
-        }
+        ImGui::InvisibleButton("##world", ImVec2(pixel(listWidth), pixel(32.0F)));
+        const bool doubleClick = ImGui::IsItemHovered() &&
+            ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
+        if (ImGui::IsItemClicked()) selectedWorld_ = index;
+        if (doubleClick) result_ = world.folder;
         ImGui::PopID();
-        drawText(width * 0.5F - 150, y + 3.0F, world.levelName);
-        drawText(width * 0.5F - 150, y + 14.0F, world.folderName + " (" + formatDate(world.lastPlayed) + ")", 0xFFAAAAAAU);
-        drawText(width * 0.5F - 150, y + 25.0F,
-                 gameModeUi(world.gameMode) + ", " + worldTypeUi(world.worldType) +
-                 (world.requiresConversion ? ", Version conversion required" : ""),
-                 world.requiresConversion ? 0xFFFF5555U : 0xFFAAAAAAU);
+
+        if (selected) {
+            draw->AddRectFilled(ImVec2(pixel(listLeft-2), pixel(static_cast<float>(y-2))),
+                                ImVec2(pixel(listLeft+listWidth+2), pixel(static_cast<float>(y+34))),
+                                IM_COL32(128,128,128,128));
+        }
+
+        // Save icons are optional in vanilla. Worlds created by Blockcraft do
+        // not yet capture a screenshot, so use Minecraft's exact missing-world
+        // icon rather than a generated placeholder.
+        draw->AddImage(textureId(unknownWorldIcon_),
+            ImVec2(pixel(listLeft), pixel(static_cast<float>(y))),
+            ImVec2(pixel(listLeft+32), pixel(static_cast<float>(y+32))),
+            ImVec2(0,0), ImVec2(1,1));
+
+        if (selected) {
+            draw->AddRectFilled(ImVec2(pixel(listLeft), pixel(static_cast<float>(y))),
+                                ImVec2(pixel(listLeft+32), pixel(static_cast<float>(y+32))),
+                                IM_COL32(255,255,255,160));
+            draw->AddImage(textureId(worldSelection_),
+                ImVec2(pixel(listLeft), pixel(static_cast<float>(y))),
+                ImVec2(pixel(listLeft+32), pixel(static_cast<float>(y+32))),
+                ImVec2(0.0F,0.0F), ImVec2(32.0F/256.0F,32.0F/256.0F));
+        }
+
+        const float tx = listLeft + 35.0F;
+        drawText(tx, y + 1.0F, world.levelName);
+        drawText(tx, y + 12.0F, world.folderName + " (" + formatDate(world.lastPlayed) + ")", 0xFF808080U);
+        std::string details = gameModeUi(world.gameMode);
+        if (world.requiresConversion) details = "Must be converted!";
+        else details += ", Version: 1.12.2";
+        drawText(tx, y + 23.0F, details, world.requiresConversion ? 0xFFFF5555U : 0xFF808080U);
     }
 
     const bool valid = selectedWorld_ >= 0 && selectedWorld_ < static_cast<int>(worlds_.size());
-    const float row1 = height - 52.0F;
-    const float row2 = height - 28.0F;
-    if (button(10, width * 0.5F - 154, row1, 150, tr("selectWorld.select", "Play Selected World"), valid) && valid)
+    if (button(10, width * 0.5F - 154, height - 52.0F, 150,
+               tr("selectWorld.select", "Play Selected World"), valid) && valid)
         result_ = worlds_[static_cast<std::size_t>(selectedWorld_)].folder;
-    if (button(11, width * 0.5F + 4, row1, 150, tr("selectWorld.create", "Create New World"))) {
+    if (button(11, width * 0.5F + 4, height - 52.0F, 150,
+               tr("selectWorld.create", "Create New World"))) {
         activeTextField_ = -1;
+        moreWorldOptions_ = false;
         screen_ = Screen::CreateWorld;
     }
-    button(12, width * 0.5F - 154, row2, 72, tr("selectWorld.edit", "Edit"), false);
-    if (button(13, width * 0.5F - 78, row2, 72, tr("selectWorld.delete", "Delete"), valid) && valid) {
+    button(12, width * 0.5F - 154, height - 28.0F, 72,
+           tr("selectWorld.edit", "Edit"), false);
+    if (button(13, width * 0.5F - 76, height - 28.0F, 72,
+               tr("selectWorld.delete", "Delete"), valid) && valid) {
         pendingDelete_ = selectedWorld_;
         screen_ = Screen::DeleteConfirm;
     }
-    button(14, width * 0.5F - 2, row2, 72, tr("selectWorld.recreate", "Re-Create"), false);
-    if (button(15, width * 0.5F + 74, row2, 80, tr("gui.cancel", "Cancel"))) screen_ = Screen::Main;
+    button(14, width * 0.5F + 4, height - 28.0F, 72,
+           tr("selectWorld.recreate", "Re-Create"), false);
+    if (button(15, width * 0.5F + 82, height - 28.0F, 72,
+               tr("gui.cancel", "Cancel")))
+        screen_ = Screen::Main;
 }
 
 void FrontEnd::renderCreateWorld(int width, int height) {
     drawTiledBackground(width, height);
     drawText(width * 0.5F, 20, tr("selectWorld.create", "Create New World"), 0xFFFFFFFFU, true);
-    const float left = width * 0.5F - 100.0F;
-    drawText(left, 48, "World Name");
-    textField(100, left, 58, 200, worldNameBuffer_.data(), worldNameBuffer_.size());
-    drawText(left, 84, "Seed for the World Generator");
-    textField(101, left, 94, 200, seedBuffer_.data(), seedBuffer_.size());
-    drawText(left, 116, "Leave blank for a random seed", 0xFFAAAAAAU);
 
-    if (button(20, left, 133, 200, "Game Mode: " + gameModeUi(create_.gameMode)))
-        create_.gameMode = create_.gameMode == GameMode::Survival ? GameMode::Creative : GameMode::Survival;
-    const std::string modeHelp = create_.gameMode == GameMode::Survival
-        ? "Search for resources, crafting, gain levels, health and hunger"
-        : "Unlimited resources, free flying and destroy blocks instantly";
-    drawText(width * 0.5F, 157, modeHelp, 0xFFAAAAAAU, true);
+    if (!moreWorldOptions_) {
+        const float left = width * 0.5F - 100.0F;
+        drawText(left, 47, tr("selectWorld.enterName", "World Name"));
+        textField(100, left, 60, 200, worldNameBuffer_.data(), worldNameBuffer_.size());
+        const std::string rawName = worldNameBuffer_.data();
+        drawText(left, 84, "Will be saved in: " + (rawName.empty() ? std::string("World") : rawName),
+                 0xFFAAAAAAU);
 
-    if (button(21, left, 173, 200, "World Type: " + worldTypeUi(create_.worldType))) {
-        const auto iterator = std::find(worldTypes.begin(), worldTypes.end(), create_.worldType);
-        create_.worldType = worldTypes[(static_cast<std::size_t>(iterator - worldTypes.begin()) + 1) % worldTypes.size()];
+        if (button(20, width * 0.5F - 75, 115, 150,
+                   tr("selectWorld.gameMode", "Game Mode") + ": " + gameModeUi(create_.gameMode))) {
+            create_.gameMode = create_.gameMode == GameMode::Survival ? GameMode::Creative : GameMode::Survival;
+        }
+        if (create_.gameMode == GameMode::Survival) {
+            drawText(width * 0.5F, 137, tr("selectWorld.gameMode.survival.line1",
+                     "Search for resources, crafting, gain levels,"), 0xFFA0A0A0U, true);
+            drawText(width * 0.5F, 149, tr("selectWorld.gameMode.survival.line2",
+                     "health and hunger"), 0xFFA0A0A0U, true);
+        } else {
+            drawText(width * 0.5F, 137, tr("selectWorld.gameMode.creative.line1",
+                     "Unlimited resources, free flying and"), 0xFFA0A0A0U, true);
+            drawText(width * 0.5F, 149, tr("selectWorld.gameMode.creative.line2",
+                     "destroy blocks instantly"), 0xFFA0A0A0U, true);
+        }
+        if (button(21, width * 0.5F - 75, 187, 150,
+                   tr("selectWorld.moreWorldOptions", "More World Options..."))) {
+            moreWorldOptions_ = true;
+            activeTextField_ = -1;
+        }
+    } else {
+        const float left = width * 0.5F - 100.0F;
+        drawText(left, 47, tr("selectWorld.enterSeed", "Seed for the World Generator"));
+        textField(101, left, 60, 200, seedBuffer_.data(), seedBuffer_.size());
+        drawText(left, 84, tr("selectWorld.seedInfo", "Leave blank for a random seed"), 0xFFA0A0A0U);
+
+        if (button(22, width * 0.5F - 155, 100, 150,
+                   tr("selectWorld.mapFeatures", "Generate Structures") + std::string(" ") +
+                   (create_.generateStructures ? tr("options.on", "ON") : tr("options.off", "OFF"))))
+            create_.generateStructures = !create_.generateStructures;
+
+        if (button(23, width * 0.5F + 5, 100, 150,
+                   tr("selectWorld.mapType", "World Type") + std::string(" ") + worldTypeUi(create_.worldType))) {
+            auto iterator = std::find(worldTypes.begin(), worldTypes.end(), create_.worldType);
+            std::size_t index = iterator == worldTypes.end() ? 0 :
+                static_cast<std::size_t>(iterator - worldTypes.begin());
+            do {
+                index = (index + 1) % worldTypes.size();
+                create_.worldType = worldTypes[index];
+            } while (create_.worldType == WorldType::DebugAllBlockStates && !ImGui::GetIO().KeyShift);
+        }
+
+        button(24, width * 0.5F - 155, 151, 150,
+               tr("selectWorld.allowCommands", "Allow Cheats") + std::string(" ") +
+               (create_.gameMode == GameMode::Creative ? tr("options.on", "ON") : tr("options.off", "OFF")),
+               false);
+        button(25, width * 0.5F + 5, 151, 150,
+               tr("selectWorld.bonusItems", "Bonus Chest") + std::string(" ") + tr("options.off", "OFF"),
+               false);
+
+        if (button(26, width * 0.5F - 75, 187, 150, tr("gui.done", "Done"))) {
+            moreWorldOptions_ = false;
+            activeTextField_ = -1;
+        }
     }
-    if (button(22, left, 197, 200, std::string("Generate Structures: ") + (create_.generateStructures ? "ON" : "OFF")))
-        create_.generateStructures = !create_.generateStructures;
 
-    if (button(23, width * 0.5F - 102, height - 28.0F, 100, tr("selectWorld.create", "Create New World"))) {
+    if (button(27, width * 0.5F - 155, height - 28.0F, 150,
+               tr("selectWorld.create", "Create New World"))) {
         create_.levelName = worldNameBuffer_.data();
         create_.seedText = seedBuffer_.data();
         create_.generatorOptions = create_.worldType == WorldType::Flat
             ? "3;minecraft:bedrock,2*minecraft:dirt,minecraft:grass;1;village" : "{}";
         result_ = WorldSave::createWorld(savesRoot_, create_, clientDefaults_);
     }
-    if (button(24, width * 0.5F + 2, height - 28.0F, 100, tr("gui.cancel", "Cancel"))) {
+    if (button(28, width * 0.5F + 5, height - 28.0F, 150, tr("gui.cancel", "Cancel"))) {
         activeTextField_ = -1;
+        moreWorldOptions_ = false;
         screen_ = Screen::SelectWorld;
     }
 }
@@ -581,6 +730,7 @@ std::optional<std::filesystem::path> FrontEnd::run() {
         glViewport(0, 0, framebufferWidth, framebufferHeight);
 
         const float seconds = std::chrono::duration<float>(std::chrono::steady_clock::now() - start).count();
+        menuSeconds_ = seconds;
         if (screen_ == Screen::Main) renderPanorama(seconds, framebufferWidth, framebufferHeight);
         else {
             glDisable(GL_DEPTH_TEST);
@@ -615,4 +765,46 @@ std::optional<std::filesystem::path> FrontEnd::run() {
         glfwSwapBuffers(window_);
     }
     return result_;
+}
+
+
+void FrontEnd::showLoading(std::string_view title, std::string_view message, int progress) {
+    if (window_ == nullptr || glfwWindowShouldClose(window_) == GLFW_TRUE) return;
+    glfwPollEvents();
+    int framebufferWidth = 0, framebufferHeight = 0;
+    glfwGetFramebufferSize(window_, &framebufferWidth, &framebufferHeight);
+    const ScaledResolution resolution = ScaledResolution::fromDisplay(
+        framebufferWidth, framebufferHeight, clientDefaults_.guiScale, false);
+    uiScale_ = static_cast<float>(resolution.scaleFactor);
+    const int width = resolution.scaledWidth;
+    const int height = resolution.scaledHeight;
+    glViewport(0, 0, framebufferWidth, framebufferHeight);
+    glDisable(GL_DEPTH_TEST);
+    glClearColor(0.25F, 0.25F, 0.25F, 1.0F);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    beginFrame();
+    ImGui::SetNextWindowPos(ImVec2(0, 0));
+    ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
+    ImGui::SetNextWindowBgAlpha(0.0F);
+    ImGui::Begin("##blockcraft-loading", nullptr,
+        ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoInputs);
+    drawTiledBackground(width, height);
+    drawText(width * 0.5F, height * 0.5F - 20.0F, title, 0xFFFFFFFFU, true);
+    drawText(width * 0.5F, height * 0.5F + 4.0F, message, 0xFFFFFFFFU, true);
+    if (progress >= 0) {
+        const int clamped = std::clamp(progress, 0, 100);
+        ImDrawList* draw = ImGui::GetForegroundDrawList();
+        const float x = width * 0.5F - 50.0F;
+        const float y = height * 0.5F + 20.0F;
+        draw->AddRectFilled(ImVec2(pixel(x), pixel(y)), ImVec2(pixel(x + 100), pixel(y + 2)),
+                            IM_COL32(128, 128, 128, 255));
+        draw->AddRectFilled(ImVec2(pixel(x), pixel(y)), ImVec2(pixel(x + clamped), pixel(y + 2)),
+                            IM_COL32(128, 255, 128, 255));
+    }
+    ImGui::End();
+    endFrame();
+    glfwSwapBuffers(window_);
+    glEnable(GL_DEPTH_TEST);
 }

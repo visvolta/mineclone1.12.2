@@ -130,13 +130,26 @@ bool ChunkStreamer::tryLoadSaved(int chunkX, int chunkZ, bool active,
     return true;
 }
 
-void ChunkStreamer::prime(double playerX, double playerZ, int radius) {
+void ChunkStreamer::prime(double playerX, double playerZ, int radius,
+                          const std::function<void(float)>& progress) {
     const int centerX = World::floorDiv16(static_cast<int>(std::floor(playerX)));
     const int centerZ = World::floorDiv16(static_cast<int>(std::floor(playerZ)));
+    const int diameter = radius * 2 + 1;
+    const int requested = diameter * diameter;
+    int completed = 0;
+    const auto report = [&] {
+        if (progress) progress(requested > 0 ? static_cast<float>(completed) /
+                                              static_cast<float>(requested) : 1.0F);
+    };
+    report();
 
     for (int dz = -radius; dz <= radius; ++dz) {
         for (int dx = -radius; dx <= radius; ++dx) {
             static_cast<void>(tryLoadSaved(centerX + dx, centerZ + dz, true, nullptr));
+            if (world_.findChunk(centerX + dx, centerZ + dz) != nullptr) {
+                ++completed;
+                report();
+            }
         }
     }
 
@@ -166,9 +179,13 @@ void ChunkStreamer::prime(double playerX, double playerZ, int radius) {
                 std::abs(chunk->z() - centerZ) <= radius &&
                 world_.findChunk(chunk->x(), chunk->z()) == nullptr) {
                 world_.insertChunk(std::move(chunk));
+                ++completed;
+                report();
             }
         }
     }
+    completed = requested;
+    report();
 }
 
 bool ChunkStreamer::schedule(int chunkX, int chunkZ, int priority) {
@@ -199,18 +216,12 @@ bool ChunkStreamer::schedule(int chunkX, int chunkZ, int priority) {
 void ChunkStreamer::cacheChunk(std::unique_ptr<Chunk> chunk) {
     if (!chunk) return;
     const std::uint64_t chunkKey = key(chunk->x(), chunk->z());
-    if (save_ != nullptr && blockEntities_ != nullptr) {
-        try {
-            save_->saveChunk(*chunk, *blockEntities_);
-            // This coordinate may have been remembered as a disk miss before it
-            // was generated. Once it is saved, a future cache eviction must be
-            // allowed to probe the region file again.
-            diskChecked_.erase(chunkKey);
-        } catch (const std::exception& error) {
-            std::cerr << "Could not save chunk " << chunk->x() << ", " << chunk->z()
-                      << ": " << error.what() << '\n';
-        }
-    }
+    // Do not perform zlib/region-file writes on the render thread merely
+    // because a chunk crossed the view-distance boundary. Stage 8 originally
+    // did this here and could write dozens of chunks while the player was
+    // joining or moving, producing severe frame stalls. Cached chunks remain
+    // owned in memory and are persisted on LRU eviction, autosave flush, or
+    // clean shutdown.
     cache_.insert_or_assign(chunkKey, CacheEntry{std::move(chunk), ++useCounter_});
 }
 
@@ -240,6 +251,9 @@ void ChunkStreamer::flushCache() {
         save_->saveChunk(*entry.chunk, *blockEntities_);
         diskChecked_.erase(chunkKey);
     }
+    // flushCache is a world-close operation. Releasing the entries here also
+    // prevents the destructor from writing the same compressed chunks twice.
+    cache_.clear();
 }
 
 ChunkStreamChanges ChunkStreamer::update(double playerX, double playerZ,
@@ -333,18 +347,31 @@ ChunkStreamChanges ChunkStreamer::update(double playerX, double playerZ,
     }
     trimCache();
 
-    // Disk-backed chunks are checked before terrain generation. Misses are
-    // remembered, but cacheChunk clears that marker after newly generated data
-    // is written so a later LRU eviction can load it back from disk.
-    for (int dz = -prefetchDistance; dz <= prefetchDistance && withinBudget(); ++dz) {
-        for (int dx = -prefetchDistance; dx <= prefetchDistance && withinBudget(); ++dx) {
+    // Disk-backed chunks are checked before terrain generation, but region
+    // I/O is intentionally incremental. The old Stage 8 loop could probe the
+    // entire (viewDistance+1)^2 area in one frame when opening a world.
+    struct DiskCandidate { int x; int z; int distanceSquared; };
+    std::vector<DiskCandidate> diskCandidates;
+    for (int dz = -prefetchDistance; dz <= prefetchDistance; ++dz) {
+        for (int dx = -prefetchDistance; dx <= prefetchDistance; ++dx) {
             const int x = centerX + dx;
             const int z = centerZ + dz;
             const auto chunkKey = key(x, z);
             if (world_.findChunk(x, z) != nullptr || cache_.contains(chunkKey) ||
-                generationQueued_.contains(chunkKey)) continue;
-            static_cast<void>(tryLoadSaved(x, z, inside(x, z, viewDistance_), &changes));
+                generationQueued_.contains(chunkKey) || diskChecked_.contains(chunkKey)) continue;
+            diskCandidates.push_back({x, z, dx * dx + dz * dz});
         }
+    }
+    std::sort(diskCandidates.begin(), diskCandidates.end(), [](const auto& a, const auto& b) {
+        return std::tie(a.distanceSquared, a.x, a.z) < std::tie(b.distanceSquared, b.x, b.z);
+    });
+    constexpr std::size_t maximumDiskChecksPerFrame = 4;
+    std::size_t diskChecks = 0;
+    for (const DiskCandidate& candidate : diskCandidates) {
+        if (diskChecks >= maximumDiskChecksPerFrame || !withinBudget()) break;
+        static_cast<void>(tryLoadSaved(candidate.x, candidate.z,
+            inside(candidate.x, candidate.z, viewDistance_), &changes));
+        ++diskChecks;
     }
 
     struct Candidate { int x; int z; int priority; };
@@ -355,7 +382,7 @@ ChunkStreamChanges ChunkStreamer::update(double playerX, double playerZ,
             const int z = centerZ + dz;
             const auto chunkKey = key(x, z);
             if (world_.findChunk(x, z) != nullptr || cache_.contains(chunkKey) ||
-                generationQueued_.contains(chunkKey)) continue;
+                generationQueued_.contains(chunkKey) || !diskChecked_.contains(chunkKey)) continue;
             const int distanceSquared = dx * dx + dz * dz;
             const float length = std::sqrt(static_cast<float>(std::max(1, distanceSquared)));
             const float forwardBias = (dx * forwardX + dz * forwardZ) / length;

@@ -7,6 +7,7 @@
 #include <optional>
 #include <iomanip>
 #include <iostream>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -181,24 +182,22 @@ int main() {
         const WorldConfig clientDefaults = WorldConfig::load(BLOCKCRAFT_CONFIG_PATH);
         glfwSwapInterval(clientDefaults.vsync ? 1 : 0);
 
+        while (glfwWindowShouldClose(window) == GLFW_FALSE) {
         // Stage 8 starts in the 1.12.2-style title screen rather than creating
         // an implicit technical world. The frontend owns its temporary ImGui
         // context and releases it before GameHud constructs the in-game one.
         setCursorCaptured(window, false);
-        std::optional<std::filesystem::path> selectedWorld;
-        {
-            FrontEnd frontEnd(window, BLOCKCRAFT_ASSET_ROOT, BLOCKCRAFT_SAVES_ROOT, clientDefaults);
-            selectedWorld = frontEnd.run();
-        }
-        if (!selectedWorld || glfwWindowShouldClose(window) == GLFW_TRUE) {
-            glfwDestroyWindow(window);
-            glfwTerminate();
-            return EXIT_SUCCESS;
-        }
+        auto frontEnd = std::make_unique<FrontEnd>(
+            window, BLOCKCRAFT_ASSET_ROOT, BLOCKCRAFT_SAVES_ROOT, clientDefaults);
+        std::optional<std::filesystem::path> selectedWorld = frontEnd->run();
+        if (!selectedWorld || glfwWindowShouldClose(window) == GLFW_TRUE) break;
 
+        frontEnd->showLoading("Loading world", "Reading world data", 5);
         ItemRegistry itemRegistry(BLOCKCRAFT_ASSET_ROOT);
+        frontEnd->showLoading("Loading world", "Loading item registry", 12);
         WorldSave worldSave(*selectedWorld, itemRegistry);
         const WorldConfig config = worldSave.loadConfig(clientDefaults);
+        frontEnd->showLoading("Loading world", "Reading level.dat", 18);
         glfwSwapInterval(config.vsync ? 1 : 0);
 
         std::cout << "World folder: " << selectedWorld->string() << "\n"
@@ -222,9 +221,15 @@ int main() {
         Player player({0.5, 80.0, 0.5});
         LoadedPlayerState loadedPlayer = worldSave.loadPlayer(player);
 
+        frontEnd->showLoading("Loading world", "Loading biome colours", 22);
         BiomeColors::load(BLOCKCRAFT_ASSET_ROOT);
         ChunkStreamer chunkStreamer(world, config, config.viewDistance, &worldSave, &blockEntities);
-        chunkStreamer.prime(loadedPlayer.position.x, loadedPlayer.position.z, 1);
+        frontEnd->showLoading("Loading world", "Building terrain", 25);
+        chunkStreamer.prime(loadedPlayer.position.x, loadedPlayer.position.z, 1,
+            [&](float progress) {
+                frontEnd->showLoading("Loading world", "Building terrain",
+                    25 + static_cast<int>(progress * 30.0F));
+            });
         if (!loadedPlayer.hasPlayer) {
             loadedPlayer.position.y = spawnHeight(
                 world, static_cast<int>(std::floor(loadedPlayer.position.x)),
@@ -232,19 +237,26 @@ int main() {
             player.restoreState(loadedPlayer.position, glm::dvec3{0.0}, loadedPlayer.gameMode, loadedPlayer.selectedHotbar);
         }
 
+        frontEnd->showLoading("Loading world", "Lighting terrain", 58);
         LightingEngine lightingEngine(world, chunkStreamer.workers());
         for (const auto& [chunkKey, chunk] : world.chunks()) {
             static_cast<void>(chunkKey);
             lightingEngine.chunkLoaded(chunk->x(), chunk->z());
         }
+        frontEnd->showLoading("Loading world", "Loading block models", 66);
         BlockRenderResources blockRenderResources(BLOCKCRAFT_ASSET_ROOT);
+        frontEnd->showLoading("Loading world", "Building texture atlas", 74);
         TextureAtlas atlas(blockRenderResources.atlas());
         blockEntities.scanLoadedWorld(world);
+        frontEnd->showLoading("Loading world", "Preparing world renderer", 82);
         WorldRenderer worldRenderer(world, atlas, blockRenderResources, chunkStreamer.workers());
         Environment environment(config);
         worldSave.loadEnvironment(environment);
+        frontEnd->showLoading("Loading world", "Loading weather and time", 88);
         EnvironmentRenderer environmentRenderer(environment);
         DebugRenderer debugRenderer(blockRenderResources);
+        frontEnd->showLoading("Loading world", "Joining world", 100);
+        frontEnd.reset();
         GameHud gameHud(window, BLOCKCRAFT_ASSET_ROOT, atlas, itemRegistry, blockRenderResources, blockEntities);
         BlockEntityRenderer blockEntityRenderer(BLOCKCRAFT_ASSET_ROOT, blockEntities);
         BlockInteraction interaction(itemRegistry, blockEntities);
@@ -277,8 +289,9 @@ int main() {
         auto nextFrameDeadline = FrameClock::now();
         double lastAutosave = previousTime;
         constexpr double autosaveIntervalSeconds = 30.0;
+        bool returnToTitle = false;
 
-        while (glfwWindowShouldClose(window) == GLFW_FALSE) {
+        while (glfwWindowShouldClose(window) == GLFW_FALSE && !returnToTitle) {
             glfwPollEvents();
 
             const bool escapeDown = keyDown(window, GLFW_KEY_ESCAPE);
@@ -459,6 +472,15 @@ int main() {
                 inventoryOpen = false;
                 setCursorCaptured(window, true);
             }
+            if (gameHud.consumeResumeRequest()) {
+                paused = false;
+                setCursorCaptured(window, true);
+                accumulator = 0.0;
+                previousTime = glfwGetTime();
+            }
+            if (gameHud.consumeReturnToTitleRequest()) {
+                returnToTitle = true;
+            }
 
             glfwSwapBuffers(window);
 
@@ -492,6 +514,13 @@ int main() {
         // and recently visited terrain survive a clean process restart.
         chunkStreamer.flushCache();
         worldSave.saveAll(world, blockEntities, config, player, environment);
+        if (returnToTitle && glfwWindowShouldClose(window) == GLFW_FALSE) {
+            setCursorCaptured(window, false);
+            glfwSetWindowTitle(window, "Blockcraft 1.12.2");
+            continue;
+        }
+        break;
+        }
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         glfwDestroyWindow(window);

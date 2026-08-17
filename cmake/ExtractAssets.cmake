@@ -97,6 +97,7 @@ set(required_jar_resources
     "assets/minecraft/textures/gui/widgets.png"
     "assets/minecraft/textures/gui/options_background.png"
     "assets/minecraft/textures/gui/world_selection.png"
+    "assets/minecraft/textures/misc/unknown_server.png"
     "assets/minecraft/textures/gui/title/minecraft.png"
     "assets/minecraft/textures/gui/title/edition.png"
     "assets/minecraft/textures/gui/title/background/panorama_0.png"
