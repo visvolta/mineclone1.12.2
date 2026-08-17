@@ -35,6 +35,16 @@ int main() {
             assert(selected.front()->quads.empty());
             continue;
         }
+        if (path == BlockRenderPath::StaticCustomRenderer) {
+            const BlockModelState state = resolveBlockModelState(makeBlockState(numericId, 0), air);
+            const auto access = resources.models();
+            assert(access.hasBlockState(state.resourceName));
+            const auto selected = access.select(state, 0);
+            assert(selected.size() == 1);
+            assert(selected.front() != nullptr);
+            assert(!selected.front()->quads.empty());
+            continue;
+        }
         if (path != BlockRenderPath::JsonModel) continue;
         bool selectedState = false;
         for (std::uint8_t meta = 0; meta < 16; ++meta) {
@@ -54,10 +64,10 @@ int main() {
     assert(paths[static_cast<std::size_t>(BlockRenderPath::JsonModel)] == 219);
     assert(paths[static_cast<std::size_t>(BlockRenderPath::CustomFluid)] == 4);
     assert(paths[static_cast<std::size_t>(BlockRenderPath::IntentionallyInvisible)] == 3);
-    assert(paths[static_cast<std::size_t>(BlockRenderPath::StaticCustomRenderer)] == 0);
-    assert(paths[static_cast<std::size_t>(BlockRenderPath::BlockEntityRenderer)] == 28);
+    assert(paths[static_cast<std::size_t>(BlockRenderPath::StaticCustomRenderer)] == 16);
+    assert(paths[static_cast<std::size_t>(BlockRenderPath::BlockEntityRenderer)] == 12);
     assert(checkedJsonStates >= 219);
 
-    std::cout << "Rendering parity table: 219 JSON, 4 fluid, 3 invisible, 0 static custom, 28 block-entity deferred.\n";
+    std::cout << "Rendering parity table: 219 JSON, 4 fluid, 3 invisible, 16 static shulker, 12 block-entity deferred.\n";
     return 0;
 }

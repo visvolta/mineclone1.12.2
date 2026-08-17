@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(Blockcraft VERSION 0.10.0 LANGUAGES C CXX)
+project(Blockcraft VERSION 0.11.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -217,6 +217,7 @@ set(BLOCKCRAFT_CORE_SOURCES
     src/environment/Environment.cpp
     src/blocks/BlockRegistry.cpp
     src/blocks/BlockShape.cpp
+    src/blocks/PlacementRules.cpp
     src/lighting/LightSolver.cpp
     src/lighting/LightingEngine.cpp
     src/player/Player.cpp
@@ -319,6 +320,30 @@ if(BUILD_TESTING)
         target_compile_options(blockcraft_item_inventory_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
     endif()
     add_test(NAME blockcraft_item_inventory COMMAND blockcraft_item_inventory_tests)
+
+    add_executable(blockcraft_placement_rules_tests
+        tests/PlacementRulesTests.cpp
+        src/blocks/BlockRegistry.cpp
+        src/blocks/BlockShape.cpp
+        src/blocks/PlacementRules.cpp
+        src/core/Json.cpp
+        src/items/ItemRegistry.cpp
+        src/player/Player.cpp
+        src/player/PlayerInventory.cpp
+        src/world/Chunk.cpp
+        src/world/World.cpp
+        src/world/Raycast.cpp
+    )
+    target_include_directories(blockcraft_placement_rules_tests PRIVATE src)
+    target_compile_definitions(blockcraft_placement_rules_tests PRIVATE
+        BLOCKCRAFT_ASSET_ROOT="${BLOCKCRAFT_ASSET_ROOT}")
+    target_link_libraries(blockcraft_placement_rules_tests PRIVATE glm::glm)
+    if(MSVC)
+        target_compile_options(blockcraft_placement_rules_tests PRIVATE /W4 /permissive- /UNDEBUG)
+    else()
+        target_compile_options(blockcraft_placement_rules_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
+    endif()
+    add_test(NAME blockcraft_placement_rules COMMAND blockcraft_placement_rules_tests)
 endif()
 
 set_property(DIRECTORY PROPERTY VS_STARTUP_PROJECT blockcraft)

@@ -203,7 +203,9 @@ void DebugRenderer::renderBreakOverlay(const World& world, const std::optional<R
                                        float progress, const glm::mat4& view,
                                        const glm::mat4& projection) {
     if (!hit || progress <= 0.0F) return;
-    if (blockRenderPath(hit->state) != BlockRenderPath::JsonModel) return;
+    const BlockRenderPath renderPath = blockRenderPath(hit->state);
+    if (renderPath != BlockRenderPath::JsonModel &&
+        renderPath != BlockRenderPath::StaticCustomRenderer) return;
 
     const auto lookup = [&](int dx, int dy, int dz) {
         return world.getBlock(hit->block.x + dx, hit->block.y + dy, hit->block.z + dz);

@@ -37,6 +37,15 @@ int main() {
     inventory.pickCreative(pickedStone);
     assert(inventory.selected().sameItem(pickedStone));
 
+
+    assert(static_cast<int>(CreativeTab::BuildingBlocks) == 0);
+    assert(static_cast<int>(CreativeTab::Hotbar) == 4);
+    assert(static_cast<int>(CreativeTab::Search) == 5);
+    assert(static_cast<int>(CreativeTab::Misc) == 6);
+    assert(static_cast<int>(CreativeTab::Inventory) == 11);
+    const ItemDefinition& whiteShulker = items.get(static_cast<std::uint16_t>(BlockId::WhiteShulkerBox));
+    assert(whiteShulker.iconResource == "minecraft:blocks/shulker_top_white");
+
     assert(!items.itemsForTab(CreativeTab::BuildingBlocks).empty());
     assert(!items.search("diamond").empty());
     return 0;

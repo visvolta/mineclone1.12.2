@@ -197,7 +197,8 @@ void ItemRegistry::add(ItemDefinition item) {
     const std::size_t index = items_.size();
     byId_[item.id] = index;
     byName_[item.name] = index;
-    if (item.tab != CreativeTab::Search && item.tab != CreativeTab::Inventory) {
+    if (item.tab != CreativeTab::Search && item.tab != CreativeTab::Inventory &&
+        item.tab != CreativeTab::Hotbar) {
         const std::size_t tabIndex = static_cast<std::size_t>(item.tab);
         if (tabIndex < creativeTabs_.size()) creativeTabs_[tabIndex].push_back(item.id);
     }
@@ -407,6 +408,14 @@ std::string ItemRegistry::resolveItemTexture(const std::filesystem::path& assetR
     else if (modelName == "lingering_potion") return "minecraft:items/potion_bottle_lingering";
     else if (modelName == "dye") return "minecraft:items/dye_powder_black";
 
+    // 1.12.2 shulker-box item models use builtin/entity and therefore have no
+    // layer0 sprite. Use the exact per-colour block particle/top texture from
+    // the JAR for the 2D inventory icon rather than falling back to missingno.
+    if (modelName.ends_with("_shulker_box")) {
+        const std::string color = modelName.substr(0, modelName.size() - std::string("_shulker_box").size());
+        return "minecraft:blocks/shulker_top_" + color;
+    }
+
     std::unordered_map<std::string, std::string> textures;
     std::unordered_set<std::string> visited;
     std::function<void(std::string, bool)> load = [&](std::string model, bool itemDefault) {
@@ -464,7 +473,7 @@ CreativeTab ItemRegistry::inferTab(std::string_view name, std::optional<BlockId>
                            "mutton", "rabbit", "potato", "carrot", "beetroot", "fish", "rotten_flesh", "pumpkin_pie"})) return CreativeTab::Food;
     if (containsAny(name, {"ingot", "nugget", "diamond", "emerald", "coal", "quartz", "dust", "shard", "crystals",
                            "stick", "string", "feather", "gunpowder", "leather", "brick", "clay_ball", "paper",
-                           "slime_ball", "bone", "sugar", "blaze_rod", "shulker_shell", "chorus_fruit_popped"})) return CreativeTab::Materials;
+                           "slime_ball", "bone", "sugar", "blaze_rod", "shulker_shell", "chorus_fruit_popped"})) return CreativeTab::Misc;
     if (block) {
         if (containsAny(name, {"sapling", "leaves", "flower", "mushroom", "grass", "fern", "deadbush", "torch",
                                "vine", "lily", "cactus", "web", "pane", "carpet", "banner", "skull",
@@ -529,7 +538,7 @@ std::string_view ItemRegistry::tabName(CreativeTab tab) {
         case CreativeTab::Tools: return "Tools";
         case CreativeTab::Combat: return "Combat";
         case CreativeTab::Brewing: return "Brewing";
-        case CreativeTab::Materials: return "Materials";
+        case CreativeTab::Hotbar: return "Saved Toolbars";
         case CreativeTab::Search: return "Search Items";
         case CreativeTab::Inventory: return "Survival Inventory";
     }

@@ -415,66 +415,172 @@ void GameHud::renderCreativeInventory(Player& player, int scaledWidth,
     const float top = static_cast<float>((scaledHeight - 136) / 2);
     const GLuint background = selectedCreativeTab_ == CreativeTab::Search ? creativeSearchTexture_ :
                               selectedCreativeTab_ == CreativeTab::Inventory ? creativeInventoryTexture_ : creativeItemsTexture_;
-    draw->AddImage(textureId(background), ImVec2(left*sx, top*sy), ImVec2((left+195)*sx,(top+136)*sy),
-                   ImVec2(0,0), ImVec2(195.0F/256.0F,136.0F/256.0F));
 
     const float mx = io.MousePos.x / sx;
     const float my = io.MousePos.y / sy;
     const bool leftClick = ImGui::IsMouseClicked(ImGuiMouseButton_Left);
     const bool rightClick = ImGui::IsMouseClicked(ImGuiMouseButton_Right);
 
-    constexpr std::array<CreativeTab, 12> tabs = {CreativeTab::BuildingBlocks, CreativeTab::Decorations,
-        CreativeTab::Redstone, CreativeTab::Transportation, CreativeTab::Misc, CreativeTab::Food,
-        CreativeTab::Tools, CreativeTab::Combat, CreativeTab::Brewing, CreativeTab::Materials,
-        CreativeTab::Search, CreativeTab::Inventory};
+    // CreativeTabs indices/columns are kept identical to 1.12.2 so the exact
+    // tabs.png atlas can be sampled with GuiContainerCreative#drawTab's UVs.
+    constexpr std::array<CreativeTab, 12> tabs = {
+        CreativeTab::BuildingBlocks, CreativeTab::Decorations, CreativeTab::Redstone,
+        CreativeTab::Transportation, CreativeTab::Hotbar, CreativeTab::Search,
+        CreativeTab::Misc, CreativeTab::Food, CreativeTab::Tools,
+        CreativeTab::Combat, CreativeTab::Brewing, CreativeTab::Inventory
+    };
+    const auto tabIcon = [](CreativeTab tab) -> ItemStack {
+        switch (tab) {
+            case CreativeTab::BuildingBlocks: return {45, 1, 0, {}};      // brick block
+            case CreativeTab::Decorations: return {175, 1, 5, {}};       // peony
+            case CreativeTab::Redstone: return {331, 1, 0, {}};          // redstone
+            case CreativeTab::Transportation: return {27, 1, 0, {}};     // powered rail
+            case CreativeTab::Hotbar: return {47, 1, 0, {}};             // bookshelf
+            case CreativeTab::Search: return {345, 1, 0, {}};            // compass
+            case CreativeTab::Misc: return {327, 1, 0, {}};              // lava bucket
+            case CreativeTab::Food: return {260, 1, 0, {}};              // apple
+            case CreativeTab::Tools: return {258, 1, 0, {}};             // iron axe
+            case CreativeTab::Combat: return {283, 1, 0, {}};            // golden sword
+            case CreativeTab::Brewing: return {373, 1, 0, {}};           // water-potion bottle base
+            case CreativeTab::Inventory: return {54, 1, 0, {}};          // chest
+        }
+        return {};
+    };
+    const auto tabRect = [&](CreativeTab tab) {
+        const int index = static_cast<int>(tab);
+        const int column = index % 6;
+        float x = left + static_cast<float>(28 * column);
+        if (column == 5) x = left + 195.0F - static_cast<float>(28 * (6 - column));
+        else if (column > 0) x += static_cast<float>(column);
+        const bool topRow = index < 6;
+        const float y = topRow ? top - 28.0F : top + 132.0F;
+        return std::array<float, 4>{x, y, static_cast<float>(column), topRow ? 1.0F : 0.0F};
+    };
+    const auto drawTab = [&](CreativeTab tab, bool selected) {
+        const auto rect = tabRect(tab);
+        const float x = rect[0], y = rect[1];
+        const int column = static_cast<int>(rect[2]);
+        const bool topRow = rect[3] != 0.0F;
+        const float u = static_cast<float>(column * 28) / 256.0F;
+        int sourceY = selected ? 32 : 0;
+        if (!topRow) sourceY += 64;
+        draw->AddImage(textureId(creativeTabsTexture_), ImVec2(x*sx, y*sy),
+                       ImVec2((x+28.0F)*sx, (y+32.0F)*sy),
+                       ImVec2(u, static_cast<float>(sourceY)/256.0F),
+                       ImVec2(u+28.0F/256.0F, static_cast<float>(sourceY+32)/256.0F));
+        const float iconY = y + 8.0F + (topRow ? 1.0F : -1.0F);
+        drawStack(tabIcon(tab), x + 6.0F, iconY, scaleFactor, false);
+    };
+
+    for (CreativeTab tab : tabs)
+        if (tab != selectedCreativeTab_) drawTab(tab, false);
+
+    draw->AddImage(textureId(background), ImVec2(left*sx, top*sy), ImVec2((left+195)*sx,(top+136)*sy),
+                   ImVec2(0,0), ImVec2(195.0F/256.0F,136.0F/256.0F));
+
     ItemStack hovered{};
-    for (std::size_t i = 0; i < tabs.size(); ++i) {
-        const bool bottom = i >= 6;
-        const int local = bottom ? static_cast<int>(i - 6) : static_cast<int>(i);
-        const float tx = left + 5.0F + local * 28.0F;
-        const float ty = bottom ? top + 132.0F : top - 28.0F;
-        const float uvY = (tabs[i] == selectedCreativeTab_ ? 32.0F : 0.0F) / 256.0F;
-        draw->AddImage(textureId(creativeTabsTexture_), ImVec2(tx*sx,ty*sy), ImVec2((tx+28)*sx,(ty+32)*sy),
-                       ImVec2(0.0F,uvY), ImVec2(28.0F/256.0F,uvY+32.0F/256.0F));
-        if (mx >= tx && mx < tx+28 && my >= ty && my < ty+32) {
-            if (leftClick) { selectedCreativeTab_ = tabs[i]; creativeScrollRow_ = 0; }
-            if (!leftClick) {
-                const std::string label(items_.tabName(tabs[i]));
-                const float width = textWidth(label) + 4.0F;
-                draw->AddRectFilled(ImVec2((mx + 8.0F) * sx, (my + 8.0F) * sy),
-                                    ImVec2((mx + 8.0F + width) * sx, (my + 20.0F) * sy),
-                                    IM_COL32(16, 0, 16, 240));
-                drawText(mx + 10.0F, my + 10.0F, label, scaleFactor);
+    CreativeTab hoveredTab = selectedCreativeTab_;
+    bool hasHoveredTab = false;
+    for (CreativeTab tab : tabs) {
+        const auto rect = tabRect(tab);
+        if (mx >= rect[0] && mx <= rect[0] + 28.0F && my >= rect[1] && my <= rect[1] + 32.0F) {
+            hoveredTab = tab;
+            hasHoveredTab = true;
+            if (leftClick) {
+                selectedCreativeTab_ = tab;
+                creativeScrollRow_ = 0;
+                if (tab != CreativeTab::Search) searchText_.clear();
             }
         }
     }
 
     if (selectedCreativeTab_ == CreativeTab::Search) {
-        const float fx = left + 82.0F, fy = top + 6.0F;
         if (ImGui::IsKeyPressed(ImGuiKey_Backspace) && !searchText_.empty()) searchText_.pop_back();
         for (ImWchar c : io.InputQueueCharacters)
-            if (c >= 32 && c < 127 && searchText_.size() < 32) searchText_.push_back(static_cast<char>(c));
-        drawText(fx + 2.0F, fy + 2.0F, searchText_, scaleFactor, false, 0xFF404040U);
+            if (c >= 32 && c < 127 && searchText_.size() < 50) searchText_.push_back(static_cast<char>(c));
+        drawText(left + 84.0F, top + 7.0F, searchText_, scaleFactor, false, 0xFFFFFFFFU);
+    } else if (selectedCreativeTab_ != CreativeTab::Inventory) {
+        drawText(left + 8.0F, top + 6.0F, ItemRegistry::tabName(selectedCreativeTab_), scaleFactor,
+                 false, 0xFF404040U);
     }
 
     if (selectedCreativeTab_ == CreativeTab::Inventory) {
-        renderSurvivalInventory(player, scaledWidth, scaledHeight, scaleFactor);
+        // Creative inventory tab uses tab_inventory.png and relocates the normal
+        // player inventory slots exactly into the 195x136 creative container.
+        for (int row = 0; row < 3; ++row) for (int column = 0; column < 9; ++column) {
+            const std::size_t index = static_cast<std::size_t>(9 + row * 9 + column);
+            const float x = left + 9.0F + column * 18.0F;
+            const float y = top + 54.0F + row * 18.0F;
+            drawStack(player.inventory().slot(index), x + 1.0F, y + 1.0F, scaleFactor);
+            if (mx >= x && mx < x+18 && my >= y && my < y+18) {
+                hovered = player.inventory().slot(index);
+                if (leftClick || rightClick) interactInventorySlot(player.inventory().slot(index), rightClick, true);
+            }
+        }
+        for (int column = 0; column < 9; ++column) {
+            const float x = left + 9.0F + column * 18.0F;
+            const float y = top + 112.0F;
+            drawStack(player.inventory().slot(static_cast<std::size_t>(column)), x + 1.0F, y + 1.0F, scaleFactor);
+            if (mx >= x && mx < x+18 && my >= y && my < y+18) {
+                hovered = player.inventory().slot(static_cast<std::size_t>(column));
+                if (leftClick || rightClick) interactInventorySlot(player.inventory().slot(static_cast<std::size_t>(column)), rightClick, true);
+            }
+        }
+        // The vanilla creative inventory bin slot is at 173,112; dropping the
+        // cursor stack on it clears the carried stack.
+        const float binX = left + 173.0F, binY = top + 112.0F;
+        if (mx >= binX && mx < binX + 18.0F && my >= binY && my < binY + 18.0F && leftClick)
+            cursorStack_.clear();
+        drawTab(selectedCreativeTab_, true);
+        if (!hovered.empty()) drawTooltip(hovered, mx, my, scaledWidth, scaledHeight, scaleFactor);
+        if (!cursorStack_.empty()) drawStack(cursorStack_, mx - 8.0F, my - 8.0F, scaleFactor);
+        if (hasHoveredTab) {
+            const std::string label(ItemRegistry::tabName(hoveredTab));
+            const float w = textWidth(label) + 8.0F;
+            draw->AddRectFilled(ImVec2((mx+10)*sx,(my+8)*sy), ImVec2((mx+10+w)*sx,(my+22)*sy), IM_COL32(16,0,16,240));
+            drawText(mx+14,my+11,label,scaleFactor,false,0xFFFFFFFFU);
+        }
         return;
     }
 
-    std::vector<ItemStack> visible = selectedCreativeTab_ == CreativeTab::Search
-        ? items_.searchStacks(searchText_)
-        : items_.creativeStacks(selectedCreativeTab_);
-    const int rows = static_cast<int>((visible.size() + 8) / 9);
-    if (io.MouseWheel != 0.0F && mx >= left && mx < left+195 && my >= top && my < top+136) {
-        creativeScrollRow_ -= io.MouseWheel > 0.0F ? 1 : -1;
-        creativeScrollRow_ = std::clamp(creativeScrollRow_, 0, std::max(0, rows - 5));
+    std::vector<ItemStack> visible;
+    if (selectedCreativeTab_ == CreativeTab::Search) visible = items_.searchStacks(searchText_);
+    else if (selectedCreativeTab_ == CreativeTab::Hotbar) {
+        // Saved-toolbar persistence is a later settings/save concern; expose the
+        // current nine-slot toolbar in the same 9-column container immediately.
+        for (std::size_t i = 0; i < PlayerInventory::hotbarSize; ++i)
+            visible.push_back(player.inventory().slot(i));
+    } else visible = items_.creativeStacks(selectedCreativeTab_);
+
+    const int rows = std::max(0, (static_cast<int>(visible.size()) + 8) / 9);
+    const int maxScroll = std::max(0, rows - 5);
+    const float wheel = io.MouseWheel;
+    if (wheel != 0.0F && maxScroll > 0)
+        creativeScrollRow_ = std::clamp(creativeScrollRow_ - (wheel > 0.0F ? 1 : -1), 0, maxScroll);
+
+    // Vanilla scrollbar track is x=175,y=18..130 and uses tabs.png u=232.
+    if (selectedCreativeTab_ != CreativeTab::Hotbar) {
+        const float trackX = left + 175.0F;
+        const float trackY = top + 18.0F;
+        const bool canScroll = maxScroll > 0;
+        float fraction = maxScroll > 0 ? static_cast<float>(creativeScrollRow_) / static_cast<float>(maxScroll) : 0.0F;
+        if (ImGui::IsMouseDown(ImGuiMouseButton_Left) && mx >= trackX && mx < trackX + 14.0F &&
+            my >= trackY && my < trackY + 112.0F && canScroll) {
+            fraction = std::clamp((my - trackY - 7.5F) / 97.0F, 0.0F, 1.0F);
+            creativeScrollRow_ = std::clamp(static_cast<int>(std::lround(fraction * maxScroll)), 0, maxScroll);
+        }
+        const float knobY = trackY + 97.0F * fraction;
+        const float u0 = (232.0F + (canScroll ? 0.0F : 12.0F)) / 256.0F;
+        draw->AddImage(textureId(creativeTabsTexture_), ImVec2(trackX*sx,knobY*sy),
+                       ImVec2((trackX+12.0F)*sx,(knobY+15.0F)*sy),
+                       ImVec2(u0,0.0F), ImVec2(u0+12.0F/256.0F,15.0F/256.0F));
     }
 
     for (int row = 0; row < 5; ++row) for (int column = 0; column < 9; ++column) {
         const int itemIndex = (creativeScrollRow_ + row) * 9 + column;
         if (itemIndex < 0 || itemIndex >= static_cast<int>(visible.size())) continue;
-        ItemStack stack = visible[static_cast<std::size_t>(itemIndex)];
+        const ItemStack stack = visible[static_cast<std::size_t>(itemIndex)];
+        if (stack.empty()) continue;
         const ItemDefinition& definition = items_.get(stack.itemId);
         const float x = left + 9.0F + column*18.0F;
         const float y = top + 18.0F + row*18.0F;
@@ -494,10 +600,22 @@ void GameHud::renderCreativeInventory(Player& player, int scaledWidth,
         drawStack(player.inventory().slot(static_cast<std::size_t>(column)), x + 1.0F, y + 1.0F, scaleFactor);
         if (mx >= x && mx < x+18 && my >= y && my < y+18) {
             hovered = player.inventory().slot(static_cast<std::size_t>(column));
-            if (leftClick || rightClick) interactInventorySlot(player.inventory().slot(static_cast<std::size_t>(column)), rightClick, true);
+            if (leftClick || rightClick)
+                interactInventorySlot(player.inventory().slot(static_cast<std::size_t>(column)), rightClick, true);
         }
     }
-    if (!hovered.empty()) drawTooltip(hovered, mx, my, scaledWidth, scaledHeight, scaleFactor);
+
+    drawTab(selectedCreativeTab_, true);
+    if (hasHoveredTab) {
+        const std::string label(ItemRegistry::tabName(hoveredTab));
+        const float width = textWidth(label) + 8.0F;
+        float tx = mx + 10.0F, ty = my + 8.0F;
+        if (tx + width > scaledWidth) tx = mx - width - 4.0F;
+        draw->AddRectFilled(ImVec2(tx*sx,ty*sy), ImVec2((tx+width)*sx,(ty+14.0F)*sy), IM_COL32(16,0,16,240));
+        drawText(tx+4.0F,ty+3.0F,label,scaleFactor,false,0xFFFFFFFFU);
+    } else if (!hovered.empty()) {
+        drawTooltip(hovered, mx, my, scaledWidth, scaledHeight, scaleFactor);
+    }
     if (!cursorStack_.empty()) drawStack(cursorStack_, mx - 8.0F, my - 8.0F, scaleFactor);
 }
 

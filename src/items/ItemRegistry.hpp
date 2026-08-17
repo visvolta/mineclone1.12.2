@@ -13,18 +13,18 @@
 #include "items/ItemStack.hpp"
 
 enum class CreativeTab : std::uint8_t {
-    BuildingBlocks,
-    Decorations,
-    Redstone,
-    Transportation,
-    Misc,
-    Food,
-    Tools,
-    Combat,
-    Brewing,
-    Materials,
-    Search,
-    Inventory
+    BuildingBlocks = 0,
+    Decorations = 1,
+    Redstone = 2,
+    Transportation = 3,
+    Hotbar = 4,
+    Search = 5,
+    Misc = 6,
+    Food = 7,
+    Tools = 8,
+    Combat = 9,
+    Brewing = 10,
+    Inventory = 11
 };
 
 struct ItemDefinition {
@@ -70,6 +70,6 @@ private:
     std::unordered_map<std::uint16_t, std::size_t> byId_;
     std::unordered_map<std::string, std::size_t> byName_;
     std::unordered_map<std::uint32_t, std::uint16_t> blockStateToItem_;
-    std::array<std::vector<std::uint16_t>, 10> creativeTabs_{};
+    std::array<std::vector<std::uint16_t>, 12> creativeTabs_{};
     ItemDefinition air_{};
 };

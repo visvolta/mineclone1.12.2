@@ -60,6 +60,28 @@ bool isDoor(BlockId id) {
            id == BlockId::DarkOakDoor;
 }
 
+bool knownNonFull(BlockId id) {
+    switch (id) {
+        case BlockId::Bed: case BlockId::GoldenRail: case BlockId::DetectorRail:
+        case BlockId::Rail: case BlockId::ActivatorRail: case BlockId::Torch:
+        case BlockId::StandingSign: case BlockId::WallSign: case BlockId::Ladder:
+        case BlockId::Lever: case BlockId::StonePressurePlate: case BlockId::WoodenPressurePlate:
+        case BlockId::LightWeightedPressurePlate: case BlockId::HeavyWeightedPressurePlate:
+        case BlockId::UnlitRedstoneTorch: case BlockId::RedstoneTorch:
+        case BlockId::StoneButton: case BlockId::WoodenButton: case BlockId::SnowLayer:
+        case BlockId::RedstoneWire: case BlockId::UnpoweredRepeater: case BlockId::PoweredRepeater:
+        case BlockId::UnpoweredComparator: case BlockId::PoweredComparator:
+        case BlockId::Trapdoor: case BlockId::IronTrapdoor: case BlockId::Vine:
+        case BlockId::FenceGate: case BlockId::SpruceFenceGate: case BlockId::BirchFenceGate:
+        case BlockId::JungleFenceGate: case BlockId::DarkOakFenceGate: case BlockId::AcaciaFenceGate:
+        case BlockId::Cocoa: case BlockId::Anvil: case BlockId::Hopper: case BlockId::Carpet:
+        case BlockId::StandingBanner: case BlockId::WallBanner:
+            return true;
+        default:
+            return isStair(id) || isHalfSlab(id) || isFence(id) || isPane(id) || isDoor(id);
+    }
+}
+
 Horizontal stairFacing(BlockState state) {
     constexpr std::array<Horizontal, 4> mapping = {
         Horizontal::East, Horizontal::West, Horizontal::South, Horizontal::North
@@ -204,6 +226,8 @@ BlockShapeSet stairs(const World& world, BlockState state, int x, int y, int z) 
 }
 
 bool normalCube(BlockState state) {
+    const BlockId id = static_cast<BlockId>(blockId(state));
+    if (knownNonFull(id)) return false;
     const BlockDefinition& definition = BlockRegistry::get(state);
     return definition.opaque && definition.fullCube;
 }
@@ -402,6 +426,12 @@ bool noCollision(BlockId id) {
         case BlockId::Reeds: case BlockId::Vine: case BlockId::StandingSign:
         case BlockId::WallSign: case BlockId::Rail: case BlockId::GoldenRail:
         case BlockId::DetectorRail: case BlockId::ActivatorRail: case BlockId::Tripwire:
+        case BlockId::Lever: case BlockId::StoneButton: case BlockId::WoodenButton:
+        case BlockId::StonePressurePlate: case BlockId::WoodenPressurePlate:
+        case BlockId::LightWeightedPressurePlate: case BlockId::HeavyWeightedPressurePlate:
+        case BlockId::UnpoweredRepeater: case BlockId::PoweredRepeater:
+        case BlockId::UnpoweredComparator: case BlockId::PoweredComparator:
+        case BlockId::Cocoa: case BlockId::StandingBanner: case BlockId::WallBanner:
             return true;
         default: return false;
     }
@@ -492,6 +522,73 @@ BlockShapeSet shapeFor(const World& world, BlockState state, int x, int y, int z
         return result;
     }
 
+    if (id == BlockId::StonePressurePlate || id == BlockId::WoodenPressurePlate ||
+        id == BlockId::LightWeightedPressurePlate || id == BlockId::HeavyWeightedPressurePlate) {
+        if (collision) return result;
+        const bool pressed = blockMetadata(state) != 0U;
+        result.add({0.0625, 0.0, 0.0625, 0.9375, pressed ? 0.03125 : 0.0625, 0.9375});
+        return result;
+    }
+    if (id == BlockId::UnpoweredRepeater || id == BlockId::PoweredRepeater ||
+        id == BlockId::UnpoweredComparator || id == BlockId::PoweredComparator) {
+        if (collision) return result;
+        result.add({0.0, 0.0, 0.0, 1.0, 0.125, 1.0});
+        return result;
+    }
+    if (id == BlockId::Rail || id == BlockId::GoldenRail || id == BlockId::DetectorRail || id == BlockId::ActivatorRail) {
+        if (collision) return result;
+        result.add({0.0, 0.0, 0.0, 1.0, 0.125, 1.0});
+        return result;
+    }
+    if (id == BlockId::StoneButton || id == BlockId::WoodenButton) {
+        if (collision) return result;
+        const bool on = (blockMetadata(state) & 8U) != 0U;
+        const double d = on ? 0.0625 : 0.125;
+        switch (blockMetadata(state) & 7U) {
+            case 0: result.add({0.3125, 1.0-d, 0.375, 0.6875, 1.0, 0.625}); break;
+            case 1: result.add({0.0, 0.375, 0.3125, d, 0.625, 0.6875}); break;
+            case 2: result.add({1.0-d, 0.375, 0.3125, 1.0, 0.625, 0.6875}); break;
+            case 3: result.add({0.3125, 0.375, 0.0, 0.6875, 0.625, d}); break;
+            case 4: result.add({0.3125, 0.375, 1.0-d, 0.6875, 0.625, 1.0}); break;
+            default: result.add({0.3125, 0.0, 0.375, 0.6875, d, 0.625}); break;
+        }
+        return result;
+    }
+    if (id == BlockId::Lever) {
+        if (collision) return result;
+        switch (blockMetadata(state) & 7U) {
+            case 1: result.add({0.0,0.2,0.3125,0.375,0.8,0.6875}); break;
+            case 2: result.add({0.625,0.2,0.3125,1.0,0.8,0.6875}); break;
+            case 3: result.add({0.3125,0.2,0.0,0.6875,0.8,0.375}); break;
+            case 4: result.add({0.3125,0.2,0.625,0.6875,0.8,1.0}); break;
+            case 5: case 6: result.add({0.25,0.0,0.25,0.75,0.6,0.75}); break;
+            default: result.add({0.25,0.4,0.25,0.75,1.0,0.75}); break;
+        }
+        return result;
+    }
+    if (id == BlockId::Carpet) {
+        result.add({0.0,0.0,0.0,1.0,0.0625,1.0});
+        return result;
+    }
+    if (id == BlockId::Bed) {
+        result.add({0.0,0.0,0.0,1.0,0.5625,1.0});
+        return result;
+    }
+    if (id == BlockId::Anvil) {
+        const bool axisX = (blockMetadata(state) & 1U) != 0U;
+        result.add(axisX ? BlockBox{0.0,0.0,0.125,1.0,1.0,0.875}
+                         : BlockBox{0.125,0.0,0.0,0.875,1.0,1.0});
+        return result;
+    }
+    if (id == BlockId::Hopper) {
+        result.add({0.0,0.0,0.0,1.0,0.625,1.0});
+        result.add({0.0,0.0,0.0,0.125,1.0,1.0});
+        result.add({0.875,0.0,0.0,1.0,1.0,1.0});
+        result.add({0.0,0.0,0.0,1.0,1.0,0.125});
+        result.add({0.0,0.0,0.875,1.0,1.0,1.0});
+        return result;
+    }
+
     if (noCollision(id)) {
         // Ray tracing still uses a finite selection box for most non-colliding
         // vegetation/circuit blocks. Keep the vanilla-style bush footprint for
@@ -545,7 +642,8 @@ bool BlockShapes::isNormalCube(BlockState state) { return normalCube(state); }
 bool BlockShapes::isTopSolid(const World& world, int x, int y, int z) {
     const BlockState state = world.getBlock(x, y, z);
     const auto id = static_cast<BlockId>(blockId(state));
-    if (BlockRegistry::get(state).fullCube || isDoubleSlab(id)) return true;
+    if (!knownNonFull(id) && BlockRegistry::get(state).fullCube) return true;
+    if (isDoubleSlab(id)) return true;
     if (isHalfSlab(id)) return (blockMetadata(state) & 8U) != 0U;
     if (isStair(id)) return stairTop(state);
     if (id == BlockId::SnowLayer) return (blockMetadata(state) & 7U) == 7U;
@@ -555,7 +653,8 @@ bool BlockShapes::isTopSolid(const World& world, int x, int y, int z) {
 bool BlockShapes::hasSolidFace(const World& world, int x, int y, int z, Face face) {
     const BlockState state = world.getBlock(x, y, z);
     const auto id = static_cast<BlockId>(blockId(state));
-    if (BlockRegistry::get(state).fullCube || isDoubleSlab(id)) return true;
+    if (!knownNonFull(id) && BlockRegistry::get(state).fullCube) return true;
+    if (isDoubleSlab(id)) return true;
     if (isHalfSlab(id)) {
         const bool top = (blockMetadata(state) & 8U) != 0U;
         return (face == Face::Up && top) || (face == Face::Down && !top);

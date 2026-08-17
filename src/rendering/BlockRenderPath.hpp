@@ -26,18 +26,6 @@ enum class BlockRenderPath : std::uint8_t {
         case BlockId::StructureVoid:
             return BlockRenderPath::IntentionallyInvisible;
 
-        case BlockId::Bed:
-        case BlockId::PistonExtension:
-        case BlockId::Chest:
-        case BlockId::StandingSign:
-        case BlockId::WallSign:
-        case BlockId::EndPortal:
-        case BlockId::EnderChest:
-        case BlockId::Skull:
-        case BlockId::TrappedChest:
-        case BlockId::StandingBanner:
-        case BlockId::WallBanner:
-        case BlockId::EndGateway:
         case BlockId::WhiteShulkerBox:
         case BlockId::OrangeShulkerBox:
         case BlockId::MagentaShulkerBox:
@@ -54,6 +42,20 @@ enum class BlockRenderPath : std::uint8_t {
         case BlockId::GreenShulkerBox:
         case BlockId::RedShulkerBox:
         case BlockId::BlackShulkerBox:
+            return BlockRenderPath::StaticCustomRenderer;
+
+        case BlockId::Bed:
+        case BlockId::PistonExtension:
+        case BlockId::Chest:
+        case BlockId::StandingSign:
+        case BlockId::WallSign:
+        case BlockId::EndPortal:
+        case BlockId::EnderChest:
+        case BlockId::Skull:
+        case BlockId::TrappedChest:
+        case BlockId::StandingBanner:
+        case BlockId::WallBanner:
+        case BlockId::EndGateway:
             return BlockRenderPath::BlockEntityRenderer;
 
         default:
