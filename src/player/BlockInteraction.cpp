@@ -3,9 +3,13 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <utility>
+#include <vector>
 
 #include "blocks/BlockShape.hpp"
 #include "lighting/LightingEngine.hpp"
+#include "items/ItemRegistry.hpp"
+#include "items/ItemStack.hpp"
 #include "player/Player.hpp"
 #include "rendering/WorldRenderer.hpp"
 #include "world/World.hpp"
@@ -84,12 +88,12 @@ std::uint8_t gateMetadata(Horizontal facing) {
     return static_cast<std::uint8_t>(facing);
 }
 
-bool sameSlabType(BlockState state, BlockId selected) {
+bool sameSlabType(BlockState state, BlockId selected, std::uint8_t itemDamage) {
     if (static_cast<BlockId>(blockId(state)) != selected) return false;
     const std::uint8_t typeMask = selected == BlockId::StoneSlab ? 7U :
                                   selected == BlockId::WoodenSlab ? 7U :
                                   selected == BlockId::StoneSlab2 ? 0U : 0U;
-    return (blockMetadata(state) & typeMask) == 0U;
+    return (blockMetadata(state) & typeMask) == (itemDamage & typeMask);
 }
 
 BlockId doubleSlabFor(BlockId single) {
@@ -201,28 +205,6 @@ bool chooseRightDoorHinge(const World& world, BlockId door, const glm::ivec3& po
 
 } // namespace
 
-BlockState BlockInteraction::selectedState() const {
-    return block(placeableBlocks_[selectedIndex_]);
-}
-
-const BlockDefinition& BlockInteraction::selectedDefinition() const {
-    return BlockRegistry::get(selectedState());
-}
-
-void BlockInteraction::selectNumber(int number) {
-    if (number >= 1 && number <= static_cast<int>(placeableBlocks_.size()))
-        selectedIndex_ = static_cast<std::size_t>(number - 1);
-}
-
-void BlockInteraction::scroll(int steps) {
-    if (steps == 0) return;
-    const int count = static_cast<int>(placeableBlocks_.size());
-    int index = static_cast<int>(selectedIndex_) - steps;
-    index %= count;
-    if (index < 0) index += count;
-    selectedIndex_ = static_cast<std::size_t>(index);
-}
-
 void BlockInteraction::commitEdit(World& world, LightingEngine& lighting,
                                   WorldRenderer& renderer, const glm::ivec3& position,
                                   BlockState state) {
@@ -238,16 +220,20 @@ void BlockInteraction::removeBlock(World& world, LightingEngine& lighting,
 }
 
 bool BlockInteraction::placeBlock(World& world, LightingEngine& lighting, WorldRenderer& renderer,
-                                  const Player& player, const glm::vec3& lookDirection,
-                                  const RaycastHit& hit) {
-    const BlockId selected = placeableBlocks_[selectedIndex_];
+                                  Player& player, const glm::vec3& lookDirection,
+                                  const RaycastHit& hit, ItemStack& held) {
+    if (held.empty()) return false;
+    const ItemDefinition& item = items_.get(held.itemId);
+    if (!item.placedBlock) return false;
+    const BlockId selected = *item.placedBlock;
+    const std::uint8_t itemDamage = static_cast<std::uint8_t>(held.damage & 15U);
     const glm::vec3 localHit = hit.hitPoint - glm::vec3(hit.block);
 
     // ItemSlab first attempts to merge the slab that was actually clicked.
-    if (isSingleSlab(selected) && sameSlabType(hit.state, selected)) {
+    if (isSingleSlab(selected) && sameSlabType(hit.state, selected, itemDamage)) {
         const bool top = (blockMetadata(hit.state) & 8U) != 0U;
         if ((hit.face == Face::Up && !top) || (hit.face == Face::Down && top)) {
-            const BlockState combined = block(doubleSlabFor(selected), blockMetadata(hit.state) & 7U);
+            const BlockState combined = block(doubleSlabFor(selected), itemDamage & 7U);
             if (!proposedStateIntersectsPlayer(world, player, hit.block, combined)) {
                 commitEdit(world, lighting, renderer, hit.block, combined);
                 return true;
@@ -260,22 +246,24 @@ bool BlockInteraction::placeBlock(World& world, LightingEngine& lighting, WorldR
     const BlockState existing = world.getBlock(target.x, target.y, target.z);
 
     // ItemSlab also merges a compatible slab in the adjacent target cell.
-    if (isSingleSlab(selected) && sameSlabType(existing, selected)) {
-        const BlockState combined = block(doubleSlabFor(selected), blockMetadata(existing) & 7U);
+    if (isSingleSlab(selected) && sameSlabType(existing, selected, itemDamage)) {
+        const BlockState combined = block(doubleSlabFor(selected), itemDamage & 7U);
         if (proposedStateIntersectsPlayer(world, player, target, combined)) return false;
         commitEdit(world, lighting, renderer, target, combined);
         return true;
     }
     if (!BlockShapes::isReplaceable(existing)) return false;
 
-    BlockState state = block(selected);
+    BlockState state = block(selected, itemDamage);
     if (selected == BlockId::Log || selected == BlockId::Log2) {
-        if (hit.face == Face::East || hit.face == Face::West) state = block(selected, 4);
-        else if (hit.face == Face::North || hit.face == Face::South) state = block(selected, 8);
+        const std::uint8_t species = selected == BlockId::Log ? (itemDamage & 3U) : (itemDamage & 1U);
+        if (hit.face == Face::East || hit.face == Face::West) state = block(selected, static_cast<std::uint8_t>(species | 4U));
+        else if (hit.face == Face::North || hit.face == Face::South) state = block(selected, static_cast<std::uint8_t>(species | 8U));
+        else state = block(selected, species);
     } else if (isSingleSlab(selected)) {
         const bool top = hit.face == Face::Down ||
             (hit.face != Face::Up && hit.face != Face::Down && localHit.y > 0.5F);
-        state = block(selected, top ? 8U : 0U);
+        state = block(selected, static_cast<std::uint8_t>((itemDamage & 7U) | (top ? 8U : 0U)));
     } else if (selected == BlockId::OakStairs || selected == BlockId::StoneStairs ||
                selected == BlockId::BrickStairs || selected == BlockId::StoneBrickStairs ||
                selected == BlockId::NetherBrickStairs || selected == BlockId::SandstoneStairs ||
@@ -345,14 +333,18 @@ bool BlockInteraction::placeBlock(World& world, LightingEngine& lighting, WorldR
 }
 
 void BlockInteraction::tick(World& world, LightingEngine& lighting, WorldRenderer& renderer,
-                            const Player& player, const glm::vec3& lookDirection,
+                            Player& player, const glm::vec3& lookDirection,
                             bool attacking, bool usingBlock) {
     if (useDelay_ > 0) --useDelay_;
     const float reach = player.gameMode() == GameMode::Creative ? 5.0F : 4.5F;
     const auto hit = raycastBlocks(world, player.eyePosition(), lookDirection, reach);
 
     if (usingBlock && useDelay_ == 0 && hit) {
-        if (placeBlock(world, lighting, renderer, player, lookDirection, *hit)) useDelay_ = 4;
+        ItemStack& held = player.inventory().selected();
+        if (placeBlock(world, lighting, renderer, player, lookDirection, *hit, held)) {
+            if (player.gameMode() != GameMode::Creative) held.shrink(1);
+            useDelay_ = 4;
+        }
     }
 
     if (!attacking || !hit) {

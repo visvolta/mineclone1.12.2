@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdint>
 #include <iomanip>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <thread>
@@ -20,6 +21,7 @@
 #include "blocks/BlockRegistry.hpp"
 #include "client/ScaledResolution.hpp"
 #include "lighting/LightingEngine.hpp"
+#include "items/ItemRegistry.hpp"
 #include "player/BlockInteraction.hpp"
 #include "player/Player.hpp"
 #include "rendering/BlockStateModelMap.hpp"
@@ -81,8 +83,8 @@ std::string glString(GLenum name) {
 
 } // namespace
 
-GameHud::GameHud(GLFWwindow* window, const std::filesystem::path& assetRoot, TextureAtlas& blockAtlas)
-    : window_(window), blockAtlas_(blockAtlas) {
+GameHud::GameHud(GLFWwindow* window, const std::filesystem::path& assetRoot, TextureAtlas& blockAtlas, const ItemRegistry& items)
+    : window_(window), blockAtlas_(blockAtlas), items_(items) {
     if (window_ == nullptr) throw std::invalid_argument("GameHud requires a GLFW window");
 
     IMGUI_CHECKVERSION();
@@ -104,9 +106,24 @@ GameHud::GameHud(GLFWwindow* window, const std::filesystem::path& assetRoot, Tex
     asciiTexture_ = loadExactTexture(
         assetRoot / "assets/minecraft/textures/font/ascii.png", 128, 128, &asciiPixels);
     buildAsciiWidths(asciiPixels);
+    inventoryTexture_ = loadExactTexture(
+        assetRoot / "assets/minecraft/textures/gui/container/inventory.png", 256, 256);
+    creativeItemsTexture_ = loadExactTexture(
+        assetRoot / "assets/minecraft/textures/gui/container/creative_inventory/tab_items.png", 256, 256);
+    creativeSearchTexture_ = loadExactTexture(
+        assetRoot / "assets/minecraft/textures/gui/container/creative_inventory/tab_item_search.png", 256, 256);
+    creativeInventoryTexture_ = loadExactTexture(
+        assetRoot / "assets/minecraft/textures/gui/container/creative_inventory/tab_inventory.png", 256, 256);
+    creativeTabsTexture_ = loadExactTexture(
+        assetRoot / "assets/minecraft/textures/gui/container/creative_inventory/tabs.png", 256, 256);
 }
 
 GameHud::~GameHud() {
+    if (creativeTabsTexture_ != 0) glDeleteTextures(1, &creativeTabsTexture_);
+    if (creativeInventoryTexture_ != 0) glDeleteTextures(1, &creativeInventoryTexture_);
+    if (creativeSearchTexture_ != 0) glDeleteTextures(1, &creativeSearchTexture_);
+    if (creativeItemsTexture_ != 0) glDeleteTextures(1, &creativeItemsTexture_);
+    if (inventoryTexture_ != 0) glDeleteTextures(1, &inventoryTexture_);
     if (asciiTexture_ != 0) glDeleteTextures(1, &asciiTexture_);
     if (widgetsTexture_ != 0) glDeleteTextures(1, &widgetsTexture_);
     ImGui_ImplOpenGL3_Shutdown();
@@ -167,27 +184,30 @@ float GameHud::textWidth(std::string_view text) const {
     return width;
 }
 
-void GameHud::drawText(float x, float y, std::string_view text, int scaleFactor, bool rightAligned) const {
+void GameHud::drawText(float x, float y, std::string_view text, int scaleFactor,
+                       bool rightAligned, unsigned int color) const {
     ImDrawList* draw = ImGui::GetBackgroundDrawList();
     float cursor = rightAligned ? x - textWidth(text) : x;
     const ImGuiIO& io = ImGui::GetIO();
     const float scaleX = static_cast<float>(scaleFactor) / std::max(io.DisplayFramebufferScale.x, 1.0e-6F);
     const float scaleY = static_cast<float>(scaleFactor) / std::max(io.DisplayFramebufferScale.y, 1.0e-6F);
+    const auto drawGlyph = [&](unsigned char character, float gx, float gy, ImU32 tint) {
+        if (character == ' ') return;
+        const int advance = charWidths_[character];
+        const int glyphX = (character & 15) * 8;
+        const int glyphY = (character >> 4) * 8;
+        const int visible = std::clamp(advance - 1, 1, 8);
+        const ImVec2 uv0(static_cast<float>(glyphX) / 128.0F, static_cast<float>(glyphY) / 128.0F);
+        const ImVec2 uv1(static_cast<float>(glyphX + visible) / 128.0F, static_cast<float>(glyphY + 8) / 128.0F);
+        draw->AddImage(textureId(asciiTexture_), ImVec2(gx * scaleX, gy * scaleY),
+                       ImVec2((gx + visible) * scaleX, (gy + 8.0F) * scaleY), uv0, uv1, tint);
+    };
     for (unsigned char character : text) {
         const int advance = charWidths_[character];
-        if (character != ' ') {
-            const int glyphX = (character & 15) * 8;
-            const int glyphY = (character >> 4) * 8;
-            const int visible = std::clamp(advance - 1, 1, 8);
-            const ImVec2 uv0(static_cast<float>(glyphX) / 128.0F,
-                             static_cast<float>(glyphY) / 128.0F);
-            const ImVec2 uv1(static_cast<float>(glyphX + visible) / 128.0F,
-                             static_cast<float>(glyphY + 8) / 128.0F);
-            draw->AddImage(textureId(asciiTexture_),
-                ImVec2(cursor * scaleX, y * scaleY),
-                ImVec2((cursor + visible) * scaleX, (y + 8.0F) * scaleY), uv0, uv1,
-                IM_COL32(224, 224, 224, 255));
-        }
+        drawGlyph(character, cursor + 1.0F, y + 1.0F, IM_COL32(0, 0, 0, 180));
+        const ImU32 tint = IM_COL32((color >> 16U) & 255U, (color >> 8U) & 255U,
+                                    color & 255U, (color >> 24U) & 255U);
+        drawGlyph(character, cursor, y, tint);
         cursor += static_cast<float>(advance);
     }
 }
@@ -213,7 +233,65 @@ void GameHud::beginFrame() {
     ImGui::NewFrame();
 }
 
-void GameHud::renderHotbar(const BlockInteraction& interaction, int scaledWidth,
+void GameHud::drawStack(const ItemStack& stack, float x, float y, int scaleFactor, bool count) const {
+    if (stack.empty()) return;
+    const ItemDefinition& item = items_.get(stack.itemId);
+    std::string icon = item.iconResource;
+    if (stack.itemId == 349) {
+        constexpr std::array<const char*, 4> fish = {"fish_cod_raw", "fish_salmon_raw", "fish_clownfish_raw", "fish_pufferfish_raw"};
+        icon = std::string("minecraft:items/") + fish[std::min<std::size_t>(stack.damage, 3)];
+    } else if (stack.itemId == 350) {
+        icon = std::string("minecraft:items/") + (stack.damage == 1 ? "fish_salmon_cooked" : "fish_cod_cooked");
+    } else if (stack.itemId == 351) {
+        constexpr std::array<const char*, 16> dyes = {"black","red","green","brown","blue","purple","cyan","silver",
+            "gray","pink","lime","yellow","light_blue","magenta","orange","white"};
+        icon = std::string("minecraft:items/dye_powder_") + dyes[std::min<std::size_t>(stack.damage, 15)];
+    }
+    const AtlasSprite* sprite = nullptr;
+    if (!icon.empty() && blockAtlas_.data().contains(icon))
+        sprite = &blockAtlas_.data().sprite(icon);
+    if (sprite == nullptr && item.placedBlock) {
+        const BlockState state = makeBlockState(static_cast<std::uint16_t>(*item.placedBlock),
+                                                static_cast<std::uint8_t>(stack.damage & 15U));
+        sprite = &blockAtlas_.data().sprite(BlockRegistry::texture(state, Face::Up));
+    }
+    if (sprite == nullptr || sprite->name == "minecraft:missingno") return;
+
+    ImDrawList* draw = ImGui::GetBackgroundDrawList();
+    const ImGuiIO& io = ImGui::GetIO();
+    const float scaleX = static_cast<float>(scaleFactor) / std::max(io.DisplayFramebufferScale.x, 1.0e-6F);
+    const float scaleY = static_cast<float>(scaleFactor) / std::max(io.DisplayFramebufferScale.y, 1.0e-6F);
+    draw->AddImage(textureId(blockAtlas_.id()), ImVec2(x * scaleX, y * scaleY),
+                   ImVec2((x + 16.0F) * scaleX, (y + 16.0F) * scaleY),
+                   ImVec2(sprite->bounds.u0, sprite->bounds.v0), ImVec2(sprite->bounds.u1, sprite->bounds.v1));
+    if (count && stack.count > 1) {
+        const std::string label = std::to_string(stack.count);
+        drawText(x + 17.0F, y + 9.0F, label, scaleFactor, true, 0xFFFFFFFFU);
+    }
+}
+
+void GameHud::drawTooltip(const ItemStack& stack, float mouseX, float mouseY,
+                          int scaledWidth, int scaledHeight, int scaleFactor) const {
+    if (stack.empty()) return;
+    const ItemDefinition& item = items_.get(stack.itemId);
+    std::string line = items_.stackDisplayName(stack);
+    const float width = textWidth(line) + 8.0F;
+    const float height = 16.0F;
+    float x = mouseX + 12.0F;
+    float y = mouseY - 12.0F;
+    if (x + width > scaledWidth) x = mouseX - width - 4.0F;
+    if (y + height > scaledHeight) y = scaledHeight - height - 2.0F;
+    y = std::max(2.0F, y);
+    ImDrawList* draw = ImGui::GetBackgroundDrawList();
+    const ImGuiIO& io = ImGui::GetIO();
+    const float sx = static_cast<float>(scaleFactor) / std::max(io.DisplayFramebufferScale.x, 1.0e-6F);
+    const float sy = static_cast<float>(scaleFactor) / std::max(io.DisplayFramebufferScale.y, 1.0e-6F);
+    draw->AddRectFilled(ImVec2(x*sx,y*sy), ImVec2((x+width)*sx,(y+height)*sy), IM_COL32(16,0,16,240));
+    draw->AddRect(ImVec2((x-1)*sx,(y-1)*sy), ImVec2((x+width+1)*sx,(y+height+1)*sy), IM_COL32(80,0,128,255));
+    drawText(x + 4.0F, y + 4.0F, line, scaleFactor, false, 0xFFFFFFFFU);
+}
+
+void GameHud::renderHotbar(const Player& player, int scaledWidth,
                            int scaledHeight, int scaleFactor) const {
     ImDrawList* draw = ImGui::GetBackgroundDrawList();
     const ImGuiIO& io = ImGui::GetIO();
@@ -228,23 +306,205 @@ void GameHud::renderHotbar(const BlockInteraction& interaction, int scaledWidth,
     draw->AddImage(textureId(widgetsTexture_), ImVec2(sx(x), sy(y)),
                    ImVec2(sx(x + 182.0F), sy(y + 22.0F)),
                    ImVec2(0.0F, 0.0F), ImVec2(182.0F / 256.0F, 22.0F / 256.0F));
-    const float selectorX = x - 1.0F + static_cast<float>(interaction.selectedIndex()) * 20.0F;
+    const float selectorX = x - 1.0F + static_cast<float>(player.inventory().selectedHotbar()) * 20.0F;
     draw->AddImage(textureId(widgetsTexture_), ImVec2(sx(selectorX), sy(y - 1.0F)),
                    ImVec2(sx(selectorX + 24.0F), sy(y + 21.0F)),
                    ImVec2(0.0F, 22.0F / 256.0F), ImVec2(24.0F / 256.0F, 44.0F / 256.0F));
-
-    // Stage 6 will replace these development stacks with ItemStacks and the
-    // vanilla baked item-model renderer. Until then, every icon is still a
-    // real 1.12.2 JAR block texture, never a generated/placeholder asset.
-    for (std::size_t slot = 0; slot < BlockInteraction::hotbarSize(); ++slot) {
-        const BlockState state = makeBlockState(static_cast<std::uint16_t>(BlockInteraction::hotbarBlock(slot)));
-        const AtlasSprite& sprite = blockAtlas_.data().sprite(BlockRegistry::texture(state, Face::Up));
+    for (std::size_t slot = 0; slot < PlayerInventory::hotbarSize; ++slot) {
         const float itemX = center - 90.0F + static_cast<float>(slot * 20) + 2.0F;
         const float itemY = static_cast<float>(scaledHeight - 19);
-        draw->AddImage(textureId(blockAtlas_.id()),
-            ImVec2(sx(itemX), sy(itemY)), ImVec2(sx(itemX + 16.0F), sy(itemY + 16.0F)),
-            ImVec2(sprite.bounds.u0, sprite.bounds.v0), ImVec2(sprite.bounds.u1, sprite.bounds.v1));
+        drawStack(player.inventory().slot(slot), itemX, itemY, scaleFactor, true);
     }
+}
+
+void GameHud::interactInventorySlot(ItemStack& slot, bool rightClick, bool creative) {
+    if (rightClick) {
+        if (cursorStack_.empty()) {
+            if (slot.empty()) return;
+            const int take = (slot.count + 1) / 2;
+            cursorStack_ = slot;
+            cursorStack_.count = take;
+            slot.shrink(take);
+            return;
+        }
+        if (slot.empty()) {
+            slot = cursorStack_;
+            slot.count = 1;
+            if (!creative) cursorStack_.shrink(1);
+            return;
+        }
+        if (slot.sameItem(cursorStack_)) {
+            const int limit = items_.get(slot.itemId).maxStackSize;
+            if (slot.count < limit) {
+                ++slot.count;
+                if (!creative) cursorStack_.shrink(1);
+            }
+        }
+        return;
+    }
+
+    if (cursorStack_.empty()) {
+        cursorStack_ = slot;
+        slot.clear();
+        return;
+    }
+    if (slot.empty()) {
+        slot = cursorStack_;
+        cursorStack_.clear();
+        return;
+    }
+    if (slot.sameItem(cursorStack_)) {
+        const int limit = items_.get(slot.itemId).maxStackSize;
+        const int moved = std::min(limit - slot.count, cursorStack_.count);
+        if (moved > 0) {
+            slot.count += moved;
+            cursorStack_.shrink(moved);
+            return;
+        }
+    }
+    std::swap(slot, cursorStack_);
+}
+
+void GameHud::renderSurvivalInventory(Player& player, int scaledWidth,
+                                      int scaledHeight, int scaleFactor) {
+    ImDrawList* draw = ImGui::GetBackgroundDrawList();
+    const ImGuiIO& io = ImGui::GetIO();
+    const float sx = static_cast<float>(scaleFactor) / std::max(io.DisplayFramebufferScale.x, 1.0e-6F);
+    const float sy = static_cast<float>(scaleFactor) / std::max(io.DisplayFramebufferScale.y, 1.0e-6F);
+    const float left = static_cast<float>((scaledWidth - 176) / 2);
+    const float top = static_cast<float>((scaledHeight - 166) / 2);
+    draw->AddImage(textureId(inventoryTexture_), ImVec2(left*sx, top*sy),
+                   ImVec2((left+176)*sx,(top+166)*sy), ImVec2(0,0), ImVec2(176.0F/256.0F,166.0F/256.0F));
+
+    const float mx = io.MousePos.x / sx;
+    const float my = io.MousePos.y / sy;
+    ItemStack hovered{};
+    const bool leftClick = ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+    const bool rightClick = ImGui::IsMouseClicked(ImGuiMouseButton_Right);
+    for (int row = 0; row < 3; ++row) for (int column = 0; column < 9; ++column) {
+        const std::size_t index = static_cast<std::size_t>(9 + row * 9 + column);
+        const float x = left + 8.0F + column * 18.0F;
+        const float y = top + 84.0F + row * 18.0F;
+        drawStack(player.inventory().slot(index), x + 1.0F, y + 1.0F, scaleFactor);
+        if (mx >= x && mx < x+18 && my >= y && my < y+18) {
+            hovered = player.inventory().slot(index);
+            if (leftClick || rightClick) interactInventorySlot(player.inventory().slot(index), rightClick, false);
+        }
+    }
+    for (int column = 0; column < 9; ++column) {
+        const std::size_t index = static_cast<std::size_t>(column);
+        const float x = left + 8.0F + column * 18.0F;
+        const float y = top + 142.0F;
+        drawStack(player.inventory().slot(index), x + 1.0F, y + 1.0F, scaleFactor);
+        if (mx >= x && mx < x+18 && my >= y && my < y+18) {
+            hovered = player.inventory().slot(index);
+            if (leftClick || rightClick) interactInventorySlot(player.inventory().slot(index), rightClick, false);
+        }
+    }
+    if (!hovered.empty()) drawTooltip(hovered, mx, my, scaledWidth, scaledHeight, scaleFactor);
+    if (!cursorStack_.empty()) drawStack(cursorStack_, mx - 8.0F, my - 8.0F, scaleFactor);
+}
+
+void GameHud::renderCreativeInventory(Player& player, int scaledWidth,
+                                      int scaledHeight, int scaleFactor) {
+    ImDrawList* draw = ImGui::GetBackgroundDrawList();
+    ImGuiIO& io = ImGui::GetIO();
+    const float sx = static_cast<float>(scaleFactor) / std::max(io.DisplayFramebufferScale.x, 1.0e-6F);
+    const float sy = static_cast<float>(scaleFactor) / std::max(io.DisplayFramebufferScale.y, 1.0e-6F);
+    const float left = static_cast<float>((scaledWidth - 195) / 2);
+    const float top = static_cast<float>((scaledHeight - 136) / 2);
+    const GLuint background = selectedCreativeTab_ == CreativeTab::Search ? creativeSearchTexture_ :
+                              selectedCreativeTab_ == CreativeTab::Inventory ? creativeInventoryTexture_ : creativeItemsTexture_;
+    draw->AddImage(textureId(background), ImVec2(left*sx, top*sy), ImVec2((left+195)*sx,(top+136)*sy),
+                   ImVec2(0,0), ImVec2(195.0F/256.0F,136.0F/256.0F));
+
+    const float mx = io.MousePos.x / sx;
+    const float my = io.MousePos.y / sy;
+    const bool leftClick = ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+    const bool rightClick = ImGui::IsMouseClicked(ImGuiMouseButton_Right);
+
+    constexpr std::array<CreativeTab, 12> tabs = {CreativeTab::BuildingBlocks, CreativeTab::Decorations,
+        CreativeTab::Redstone, CreativeTab::Transportation, CreativeTab::Misc, CreativeTab::Food,
+        CreativeTab::Tools, CreativeTab::Combat, CreativeTab::Brewing, CreativeTab::Materials,
+        CreativeTab::Search, CreativeTab::Inventory};
+    ItemStack hovered{};
+    for (std::size_t i = 0; i < tabs.size(); ++i) {
+        const bool bottom = i >= 6;
+        const int local = bottom ? static_cast<int>(i - 6) : static_cast<int>(i);
+        const float tx = left + 5.0F + local * 28.0F;
+        const float ty = bottom ? top + 132.0F : top - 28.0F;
+        const float uvY = (tabs[i] == selectedCreativeTab_ ? 32.0F : 0.0F) / 256.0F;
+        draw->AddImage(textureId(creativeTabsTexture_), ImVec2(tx*sx,ty*sy), ImVec2((tx+28)*sx,(ty+32)*sy),
+                       ImVec2(0.0F,uvY), ImVec2(28.0F/256.0F,uvY+32.0F/256.0F));
+        if (mx >= tx && mx < tx+28 && my >= ty && my < ty+32) {
+            if (leftClick) { selectedCreativeTab_ = tabs[i]; creativeScrollRow_ = 0; }
+            if (!leftClick) {
+                const std::string label(items_.tabName(tabs[i]));
+                const float width = textWidth(label) + 4.0F;
+                draw->AddRectFilled(ImVec2((mx + 8.0F) * sx, (my + 8.0F) * sy),
+                                    ImVec2((mx + 8.0F + width) * sx, (my + 20.0F) * sy),
+                                    IM_COL32(16, 0, 16, 240));
+                drawText(mx + 10.0F, my + 10.0F, label, scaleFactor);
+            }
+        }
+    }
+
+    if (selectedCreativeTab_ == CreativeTab::Search) {
+        const float fx = left + 82.0F, fy = top + 6.0F;
+        if (ImGui::IsKeyPressed(ImGuiKey_Backspace) && !searchText_.empty()) searchText_.pop_back();
+        for (ImWchar c : io.InputQueueCharacters)
+            if (c >= 32 && c < 127 && searchText_.size() < 32) searchText_.push_back(static_cast<char>(c));
+        drawText(fx + 2.0F, fy + 2.0F, searchText_, scaleFactor, false, 0xFF404040U);
+    }
+
+    if (selectedCreativeTab_ == CreativeTab::Inventory) {
+        renderSurvivalInventory(player, scaledWidth, scaledHeight, scaleFactor);
+        return;
+    }
+
+    std::vector<ItemStack> visible = selectedCreativeTab_ == CreativeTab::Search
+        ? items_.searchStacks(searchText_)
+        : items_.creativeStacks(selectedCreativeTab_);
+    const int rows = static_cast<int>((visible.size() + 8) / 9);
+    if (io.MouseWheel != 0.0F && mx >= left && mx < left+195 && my >= top && my < top+136) {
+        creativeScrollRow_ -= io.MouseWheel > 0.0F ? 1 : -1;
+        creativeScrollRow_ = std::clamp(creativeScrollRow_, 0, std::max(0, rows - 5));
+    }
+
+    for (int row = 0; row < 5; ++row) for (int column = 0; column < 9; ++column) {
+        const int itemIndex = (creativeScrollRow_ + row) * 9 + column;
+        if (itemIndex < 0 || itemIndex >= static_cast<int>(visible.size())) continue;
+        ItemStack stack = visible[static_cast<std::size_t>(itemIndex)];
+        const ItemDefinition& definition = items_.get(stack.itemId);
+        const float x = left + 9.0F + column*18.0F;
+        const float y = top + 18.0F + row*18.0F;
+        drawStack(stack, x + 1.0F, y + 1.0F, scaleFactor, false);
+        if (mx >= x && mx < x+18 && my >= y && my < y+18) {
+            hovered = stack;
+            if (leftClick || rightClick) {
+                cursorStack_ = stack;
+                cursorStack_.count = rightClick ? 1 : definition.maxStackSize;
+            }
+        }
+    }
+
+    for (int column = 0; column < 9; ++column) {
+        const float x = left + 9.0F + column*18.0F;
+        const float y = top + 112.0F;
+        drawStack(player.inventory().slot(static_cast<std::size_t>(column)), x + 1.0F, y + 1.0F, scaleFactor);
+        if (mx >= x && mx < x+18 && my >= y && my < y+18) {
+            hovered = player.inventory().slot(static_cast<std::size_t>(column));
+            if (leftClick || rightClick) interactInventorySlot(player.inventory().slot(static_cast<std::size_t>(column)), rightClick, true);
+        }
+    }
+    if (!hovered.empty()) drawTooltip(hovered, mx, my, scaledWidth, scaledHeight, scaleFactor);
+    if (!cursorStack_.empty()) drawStack(cursorStack_, mx - 8.0F, my - 8.0F, scaleFactor);
+}
+
+void GameHud::renderInventory(Player& player, bool creative, int scaledWidth,
+                              int scaledHeight, int scaleFactor) {
+    if (creative) renderCreativeInventory(player, scaledWidth, scaledHeight, scaleFactor);
+    else renderSurvivalInventory(player, scaledWidth, scaledHeight, scaleFactor);
 }
 
 void GameHud::renderDebug(const World& world, const Player& player, const Camera& camera,
@@ -365,20 +625,23 @@ void GameHud::renderDebug(const World& world, const Player& player, const Camera
             2.0F + 9.0F * static_cast<float>(index), right[index], scaleFactor, true);
 }
 
-void GameHud::render(const World& world, const Player& player, const Camera& camera,
-                     const BlockInteraction& interaction, const WorldConfig& config,
-                     const ChunkStreamer& streamer, const LightingEngine& lighting,
-                     const WorldRenderer& renderer, const std::optional<RaycastHit>& hit,
+void GameHud::render(const World& world, Player& player, const Camera& camera,
+                     const WorldConfig& config, const ChunkStreamer& streamer,
+                     const LightingEngine& lighting, const WorldRenderer& renderer,
+                     const std::optional<RaycastHit>& hit,
                      int framebufferWidth, int framebufferHeight, double framesPerSecond,
-                     bool showDebug, bool paused) {
+                     bool showDebug, bool paused, bool inventoryOpen) {
     const ScaledResolution scaled = ScaledResolution::fromDisplay(
         framebufferWidth, framebufferHeight, config.guiScale, false);
-    renderHotbar(interaction, scaled.scaledWidth, scaled.scaledHeight, scaled.scaleFactor);
-    if (showDebug)
+    if (!inventoryOpen) renderHotbar(player, scaled.scaledWidth, scaled.scaledHeight, scaled.scaleFactor);
+    if (showDebug && !inventoryOpen)
         renderDebug(world, player, camera, config, streamer, lighting, renderer, hit,
                     scaled.scaledWidth, scaled.scaledHeight, scaled.scaleFactor,
                     framebufferWidth, framebufferHeight, framesPerSecond);
-    if (paused) {
+    if (inventoryOpen)
+        renderInventory(player, player.gameMode() == GameMode::Creative,
+                        scaled.scaledWidth, scaled.scaledHeight, scaled.scaleFactor);
+    if (paused && !inventoryOpen) {
         const std::string label = "Paused";
         drawText(static_cast<float>(scaled.scaledWidth) * 0.5F - textWidth(label) * 0.5F,
                  static_cast<float>(scaled.scaledHeight) * 0.5F - 4.0F,

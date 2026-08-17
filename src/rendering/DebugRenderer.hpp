@@ -23,7 +23,7 @@ public:
                        const glm::mat4& view, const glm::mat4& projection);
     void renderBreakOverlay(const World& world, const std::optional<RaycastHit>& hit,
                             float progress, const glm::mat4& view, const glm::mat4& projection);
-    void renderCrosshair(int framebufferWidth, int framebufferHeight);
+    void renderCrosshair(int framebufferWidth, int framebufferHeight, int guiScaleFactor);
 
 private:
     const BlockRenderResources& resources_;

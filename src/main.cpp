@@ -16,6 +16,8 @@
 #include <glm/ext/matrix_clip_space.hpp>
 
 #include "rendering/Camera.hpp"
+#include "client/ScaledResolution.hpp"
+#include "items/ItemRegistry.hpp"
 #include "environment/Environment.hpp"
 #include "lighting/LightingEngine.hpp"
 #include "player/BlockInteraction.hpp"
@@ -97,7 +99,7 @@ void setCursorCaptured(GLFWwindow* window, bool captured) {
 }
 
 void updateWindowTitle(GLFWwindow* window, const Player& player,
-                       const BlockInteraction& interaction, const WorldConfig& config,
+                       const ItemRegistry& items, const WorldConfig& config,
                        double framesPerSecond, std::size_t loadedChunks,
                        const ChunkStreamer& streamer, const LightingEngine& lighting,
                        const WorldRenderer& renderer) {
@@ -112,8 +114,9 @@ void updateWindowTitle(GLFWwindow* window, const Player& player,
           << " | visible " << stats.visibleSections << '/' << stats.totalSections
           << " | draws " << stats.drawCalls
           << " | " << worldTypeName(config.worldType)
-          << " | " << mode
-          << " | " << interaction.selectedDefinition().name;
+          << " | " << mode;
+    const ItemStack& held = player.inventory().selected();
+    if (!held.empty()) title << " | " << items.get(held.itemId).displayName;
     glfwSetWindowTitle(window, title.str().c_str());
 }
 
@@ -196,15 +199,16 @@ int main() {
         }
         BlockRenderResources blockRenderResources(BLOCKCRAFT_ASSET_ROOT);
         TextureAtlas atlas(blockRenderResources.atlas());
+        ItemRegistry itemRegistry(BLOCKCRAFT_ASSET_ROOT);
         WorldRenderer worldRenderer(world, atlas, blockRenderResources, chunkStreamer.workers());
         Environment environment(config);
         EnvironmentRenderer environmentRenderer(environment);
         DebugRenderer debugRenderer(blockRenderResources);
-        GameHud gameHud(window, BLOCKCRAFT_ASSET_ROOT, atlas);
+        GameHud gameHud(window, BLOCKCRAFT_ASSET_ROOT, atlas, itemRegistry);
         Player player({0.5, spawnHeight(world, 0, 0), 0.5});
-        BlockInteraction interaction;
+        BlockInteraction interaction(itemRegistry);
         camera.setPosition(player.eyePosition());
-        updateWindowTitle(window, player, interaction, config, 0.0, world.chunkCount(),
+        updateWindowTitle(window, player, itemRegistry, config, 0.0, world.chunkCount(),
                           chunkStreamer, lightingEngine, worldRenderer);
 
         double previousTime = glfwGetTime();
@@ -212,6 +216,9 @@ int main() {
         bool showDebug = false;
         bool f3WasDown = false;
         bool escapeWasDown = false;
+        bool eWasDown = false;
+        bool middleWasDown = false;
+        bool inventoryOpen = false;
         bool paused = false;
         bool gWasDown = false;
         bool jumpWasDown = false;
@@ -232,12 +239,25 @@ int main() {
 
             const bool escapeDown = keyDown(window, GLFW_KEY_ESCAPE);
             if (escapeDown && !escapeWasDown) {
-                paused = !paused;
-                setCursorCaptured(window, !paused);
-                accumulator = 0.0;
-                jumpPressPending = false;
+                if (inventoryOpen) {
+                    inventoryOpen = false;
+                    setCursorCaptured(window, true);
+                } else {
+                    paused = !paused;
+                    setCursorCaptured(window, !paused);
+                    accumulator = 0.0;
+                    jumpPressPending = false;
+                }
             }
             escapeWasDown = escapeDown;
+
+            const bool eDown = keyDown(window, GLFW_KEY_E);
+            if (eDown && !eWasDown && !paused) {
+                inventoryOpen = !inventoryOpen;
+                setCursorCaptured(window, !inventoryOpen);
+                jumpPressPending = false;
+            }
+            eWasDown = eDown;
 
             const bool f3Down = keyDown(window, GLFW_KEY_F3);
             if (f3Down && !f3WasDown) showDebug = !showDebug;
@@ -254,17 +274,17 @@ int main() {
 
             if (!paused) {
                 const bool gDown = keyDown(window, GLFW_KEY_G);
-                if (gDown && !gWasDown) player.toggleGameMode();
+                if (!inventoryOpen && gDown && !gWasDown) player.toggleGameMode();
                 gWasDown = gDown;
 
                 for (int index = 0; index < 9; ++index) {
                     const bool down = keyDown(window, GLFW_KEY_1 + index);
-                    if (down && !numberWasDown[static_cast<std::size_t>(index)])
-                        interaction.selectNumber(index + 1);
+                    if (!inventoryOpen && down && !numberWasDown[static_cast<std::size_t>(index)])
+                        player.inventory().selectHotbar(static_cast<std::size_t>(index));
                     numberWasDown[static_cast<std::size_t>(index)] = down;
                 }
-                if (pendingScroll != 0.0) {
-                    interaction.scroll(pendingScroll > 0.0 ? 1 : -1);
+                if (!inventoryOpen && pendingScroll != 0.0) {
+                    player.inventory().scroll(pendingScroll > 0.0 ? 1 : -1);
                     pendingScroll = 0.0;
                 }
 
@@ -273,10 +293,13 @@ int main() {
                 jumpWasDown = jumpDown;
 
                 while (accumulator >= tickDuration) {
-                    player.tick(world, readPlayerInput(window, jumpPressPending), camera.front());
-                    interaction.tick(world, lightingEngine, worldRenderer, player, camera.front(),
-                                     glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS,
-                                     glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS);
+                    PlayerInput tickInput = inventoryOpen ? PlayerInput{} : readPlayerInput(window, jumpPressPending);
+                    player.tick(world, tickInput, camera.front());
+                    if (!inventoryOpen) {
+                        interaction.tick(world, lightingEngine, worldRenderer, player, camera.front(),
+                                         glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS,
+                                         glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS);
+                    }
                     environment.tick(world);
                     jumpPressPending = false;
                     accumulator -= tickDuration;
@@ -331,18 +354,33 @@ int main() {
                 glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
                 const float reach = player.gameMode() == GameMode::Creative ? 5.0F : 4.5F;
                 currentHit = raycastBlocks(world, camera.position(), camera.front(), reach);
-                if (!paused) {
+                if (!paused && !inventoryOpen) {
                     debugRenderer.renderBreakOverlay(world, currentHit, interaction.breakProgress(), view, projection);
                     debugRenderer.renderOutline(world, currentHit, view, projection);
-                    if (!showDebug) debugRenderer.renderCrosshair(framebufferWidth, framebufferHeight);
+                    if (!showDebug) {
+                        const ScaledResolution crosshairScale = ScaledResolution::fromDisplay(
+                            framebufferWidth, framebufferHeight, config.guiScale, false);
+                        debugRenderer.renderCrosshair(framebufferWidth, framebufferHeight, crosshairScale.scaleFactor);
+                    }
                 }
+
+                const bool middleDown = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_MIDDLE) == GLFW_PRESS;
+                if (!paused && !inventoryOpen && currentHit && middleDown && !middleWasDown &&
+                    player.gameMode() == GameMode::Creative) {
+                    ItemStack picked = itemRegistry.stackForBlock(currentHit->state, 64);
+                    if (!picked.empty()) {
+                        picked.count = itemRegistry.get(picked.itemId).maxStackSize;
+                        player.inventory().pickCreative(picked);
+                    }
+                }
+                middleWasDown = middleDown;
             }
 
             gameHud.beginFrame();
-            gameHud.render(world, player, camera, interaction, config, chunkStreamer,
+            gameHud.render(world, player, camera, config, chunkStreamer,
                            lightingEngine, worldRenderer, currentHit,
                            framebufferWidth, framebufferHeight, displayedFps,
-                           showDebug, paused);
+                           showDebug, paused, inventoryOpen);
             gameHud.endFrame();
 
             glfwSwapBuffers(window);
@@ -361,7 +399,7 @@ int main() {
             const double titleElapsed = currentTime - titleIntervalStart;
             if (titleElapsed >= 0.5) {
                 displayedFps = static_cast<double>(titleFrameCount) / titleElapsed;
-                updateWindowTitle(window, player, interaction, config, displayedFps,
+                updateWindowTitle(window, player, itemRegistry, config, displayedFps,
                                   world.chunkCount(), chunkStreamer, lightingEngine, worldRenderer);
                 titleIntervalStart = currentTime;
                 titleFrameCount = 0;

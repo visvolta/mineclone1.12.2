@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(Blockcraft VERSION 0.9.0 LANGUAGES C CXX)
+project(Blockcraft VERSION 0.10.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -27,6 +27,7 @@ set(BLOCKCRAFT_FOUNDATION_SOURCES
     src/blocks/BlockShape.cpp
     src/core/ThreadPool.cpp
     src/player/Player.cpp
+    src/player/PlayerInventory.cpp
     src/world/Chunk.cpp
     src/world/World.cpp
     src/world/Raycast.cpp
@@ -219,6 +220,8 @@ set(BLOCKCRAFT_CORE_SOURCES
     src/lighting/LightSolver.cpp
     src/lighting/LightingEngine.cpp
     src/player/Player.cpp
+    src/player/PlayerInventory.cpp
+    src/items/ItemRegistry.cpp
     src/world/Chunk.cpp
     src/world/World.cpp
     src/rendering/ChunkMesher.cpp
@@ -299,6 +302,23 @@ if(BUILD_TESTING)
         target_compile_options(blockcraft_rendering_parity_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
     endif()
     add_test(NAME blockcraft_rendering_parity COMMAND blockcraft_rendering_parity_tests)
+
+    add_executable(blockcraft_item_inventory_tests
+        tests/ItemInventoryTests.cpp
+        src/blocks/BlockRegistry.cpp
+        src/core/Json.cpp
+        src/items/ItemRegistry.cpp
+        src/player/PlayerInventory.cpp
+    )
+    target_include_directories(blockcraft_item_inventory_tests PRIVATE src)
+    target_compile_definitions(blockcraft_item_inventory_tests PRIVATE
+        BLOCKCRAFT_ASSET_ROOT="${BLOCKCRAFT_ASSET_ROOT}")
+    if(MSVC)
+        target_compile_options(blockcraft_item_inventory_tests PRIVATE /W4 /permissive- /UNDEBUG)
+    else()
+        target_compile_options(blockcraft_item_inventory_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
+    endif()
+    add_test(NAME blockcraft_item_inventory COMMAND blockcraft_item_inventory_tests)
 endif()
 
 set_property(DIRECTORY PROPERTY VS_STARTUP_PROJECT blockcraft)

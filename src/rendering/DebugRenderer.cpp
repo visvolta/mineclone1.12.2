@@ -298,16 +298,17 @@ void DebugRenderer::renderBreakOverlay(const World& world, const std::optional<R
     glDisable(GL_BLEND);
 }
 
-void DebugRenderer::renderCrosshair(int framebufferWidth, int framebufferHeight) {
+void DebugRenderer::renderCrosshair(int framebufferWidth, int framebufferHeight, int guiScaleFactor) {
     if (framebufferWidth <= 0 || framebufferHeight <= 0) return;
     const float width = static_cast<float>(framebufferWidth);
     const float height = static_cast<float>(framebufferHeight);
     const float centerX = width * 0.5F;
     const float centerY = height * 0.5F;
-    const float left = 2.0F * (centerX - 7.0F) / width - 1.0F;
-    const float right = 2.0F * (centerX + 9.0F) / width - 1.0F;
-    const float top = 1.0F - 2.0F * (centerY - 7.0F) / height;
-    const float bottom = 1.0F - 2.0F * (centerY + 9.0F) / height;
+    const float scale = static_cast<float>(std::max(1, guiScaleFactor));
+    const float left = 2.0F * (centerX - 8.0F * scale) / width - 1.0F;
+    const float right = 2.0F * (centerX + 8.0F * scale) / width - 1.0F;
+    const float top = 1.0F - 2.0F * (centerY - 8.0F * scale) / height;
+    const float bottom = 1.0F - 2.0F * (centerY + 8.0F * scale) / height;
     constexpr float tile = 16.0F / 256.0F;
     const std::array<float, 16> vertices = {
         left, bottom, 0.0F, tile,

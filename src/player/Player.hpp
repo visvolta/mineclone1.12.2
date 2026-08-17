@@ -2,6 +2,8 @@
 
 #include <glm/vec3.hpp>
 
+#include "player/PlayerInventory.hpp"
+
 class World;
 
 enum class GameMode { Survival, Creative };
@@ -39,6 +41,8 @@ public:
     [[nodiscard]] const glm::dvec3& velocity() const { return velocity_; }
     [[nodiscard]] Aabb bounds() const;
     [[nodiscard]] bool intersectsBlock(const World& world, const glm::ivec3& block) const;
+    [[nodiscard]] PlayerInventory& inventory() { return inventory_; }
+    [[nodiscard]] const PlayerInventory& inventory() const { return inventory_; }
 
 private:
     void moveWithCollisions(const World& world, double x, double y, double z, bool sneaking);
@@ -47,6 +51,7 @@ private:
     glm::dvec3 position_;
     glm::dvec3 previousPosition_;
     glm::dvec3 velocity_{0.0};
+    PlayerInventory inventory_{};
     GameMode gameMode_ = GameMode::Survival;
     bool flying_ = false;
     bool onGround_ = false;
