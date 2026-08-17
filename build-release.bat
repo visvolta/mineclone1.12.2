@@ -50,6 +50,7 @@ if errorlevel 1 (
     echo Initial configure failed. Clearing stale FetchContent sub-build state and retrying once...
     if exist "build\_deps\glm-subbuild" rmdir /s /q "build\_deps\glm-subbuild"
     if exist "build\_deps\glm-build" rmdir /s /q "build\_deps\glm-build"
+    if exist "build\_deps\glm-src" rmdir /s /q "build\_deps\glm-src"
     "%CMAKE_EXE%" -S . -B build -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTING=ON -DBLOCKCRAFT_REQUIRE_MINECRAFT_ASSETS=ON -DCMAKE_POLICY_VERSION_MINIMUM=3.10
     if errorlevel 1 goto :failed
 )

@@ -24,8 +24,10 @@ endif()
 # pinned to the exact upstream 1.0.1 commit.
 FetchContent_Declare(
     glm
-    URL https://github.com/g-truc/glm/archive/0af55ccecd98d4e5a8d1fad7de25ba429d60e863.tar.gz
-    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    GIT_REPOSITORY https://github.com/g-truc/glm.git
+    GIT_TAG 0af55ccecd98d4e5a8d1fad7de25ba429d60e863
+    GIT_SHALLOW FALSE
+    GIT_PROGRESS TRUE
     SOURCE_SUBDIR __blockcraft_header_only_no_cmake
 )
 FetchContent_MakeAvailable(glm)
