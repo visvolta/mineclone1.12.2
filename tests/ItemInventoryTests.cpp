@@ -46,6 +46,20 @@ int main() {
     const ItemDefinition& whiteShulker = items.get(static_cast<std::uint16_t>(BlockId::WhiteShulkerBox));
     assert(whiteShulker.iconResource == "minecraft:blocks/shulker_top_white");
 
+    const ItemStack cobbleSlab{static_cast<std::uint16_t>(BlockId::StoneSlab), 64, 3, {}};
+    const ItemStack brickSlab{static_cast<std::uint16_t>(BlockId::StoneSlab), 64, 4, {}};
+    const ItemStack quartzSlab{static_cast<std::uint16_t>(BlockId::StoneSlab), 64, 7, {}};
+    assert(items.stackDisplayName(cobbleSlab) == "Cobblestone Slab");
+    assert(items.stackDisplayName(brickSlab) == "Brick Slab");
+    assert(items.stackDisplayName(quartzSlab) == "Quartz Slab");
+    assert(items.stackDisplayName(ItemStack{355,1,14,{}}) == "Red Bed");
+    assert(items.stackDisplayName(ItemStack{397,1,5,{}}) == "Dragon Head");
+    assert(items.stackDisplayName(ItemStack{425,1,15,{}}) == "White Banner");
+    assert(items.stackDisplayName(ItemStack{static_cast<std::uint16_t>(BlockId::Anvil),64,2,{}}) == "Very Damaged Anvil");
+    const auto slabSearch = items.searchStacks("cobblestone slab");
+    assert(!slabSearch.empty());
+    assert(items.stackDisplayName(slabSearch.front()) == "Cobblestone Slab");
+
     assert(!items.itemsForTab(CreativeTab::BuildingBlocks).empty());
     assert(!items.search("diamond").empty());
     return 0;

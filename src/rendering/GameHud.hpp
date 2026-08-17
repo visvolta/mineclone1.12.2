@@ -13,12 +13,14 @@
 #include "items/ItemRegistry.hpp"
 #include "items/ItemStack.hpp"
 #include "world/Raycast.hpp"
+#include "world/BlockEntitySystem.hpp"
 
 struct GLFWwindow;
 class Camera;
 class LightingEngine;
 class Player;
 class TextureAtlas;
+class BlockRenderResources;
 class World;
 class WorldRenderer;
 class ChunkStreamer;
@@ -27,7 +29,8 @@ struct WorldConfig;
 class GameHud {
 public:
     GameHud(GLFWwindow* window, const std::filesystem::path& assetRoot,
-            TextureAtlas& blockAtlas, const ItemRegistry& items);
+            TextureAtlas& blockAtlas, const ItemRegistry& items,
+            const BlockRenderResources& resources, BlockEntitySystem& blockEntities);
     ~GameHud();
     GameHud(const GameHud&) = delete;
     GameHud& operator=(const GameHud&) = delete;
@@ -41,6 +44,12 @@ public:
                 bool showDebug, bool paused, bool inventoryOpen);
     void endFrame();
 
+    void openBlockEntityScreen(const BlockEntityAction& action);
+    void closeBlockEntityScreen();
+    [[nodiscard]] bool hasBlockEntityScreen() const { return activeBlockEntityAction_.has_value(); }
+    bool consumeScreenCloseRequest() { const bool value=screenCloseRequested_; screenCloseRequested_=false; return value; }
+    [[nodiscard]] bool capturesTextInput() const { return searchFocused_ || (activeBlockEntityAction_ && activeBlockEntityAction_->type == BlockEntityActionType::EditSign); }
+
 private:
     GLuint loadExactTexture(const std::filesystem::path& path, int expectedWidth,
                             int expectedHeight, std::vector<unsigned char>* rgba = nullptr);
@@ -52,6 +61,8 @@ private:
                        bool rightAligned = false) const;
     void drawStack(const ItemStack& stack, float x, float y, int scaleFactor,
                    bool count = true) const;
+    bool drawBlockModelStack(const ItemStack& stack, float x, float y, int scaleFactor) const;
+    bool drawBuiltinEntityStack(const ItemStack& stack, float x, float y, int scaleFactor) const;
     void drawTooltip(const ItemStack& stack, float mouseX, float mouseY,
                      int scaledWidth, int scaledHeight, int scaleFactor) const;
     void renderHotbar(const Player& player, int scaledWidth, int scaledHeight,
@@ -63,6 +74,9 @@ private:
     void renderCreativeInventory(Player& player, int scaledWidth,
                                  int scaledHeight, int scaleFactor);
     void interactInventorySlot(ItemStack& slot, bool rightClick, bool creative);
+    void renderBlockEntityScreen(const World& world, Player& player, int scaledWidth, int scaledHeight, int scaleFactor);
+    void renderContainerScreen(const World& world, Player& player, int scaledWidth, int scaledHeight, int scaleFactor);
+    void renderSignEditor(int scaledWidth, int scaledHeight, int scaleFactor);
     void renderDebug(const World& world, const Player& player, const Camera& camera,
                      const WorldConfig& config, const ChunkStreamer& streamer,
                      const LightingEngine& lighting, const WorldRenderer& renderer,
@@ -73,6 +87,8 @@ private:
     GLFWwindow* window_ = nullptr;
     TextureAtlas& blockAtlas_;
     const ItemRegistry& items_;
+    const BlockRenderResources& resources_;
+    BlockEntitySystem& blockEntities_;
     GLuint widgetsTexture_ = 0;
     GLuint asciiTexture_ = 0;
     GLuint inventoryTexture_ = 0;
@@ -80,9 +96,19 @@ private:
     GLuint creativeSearchTexture_ = 0;
     GLuint creativeInventoryTexture_ = 0;
     GLuint creativeTabsTexture_ = 0;
+    GLuint generic54Texture_ = 0;
+    GLuint chestItemTexture_ = 0;
+    GLuint trappedChestItemTexture_ = 0;
+    GLuint enderChestItemTexture_ = 0;
+    std::array<GLuint, 16> bedItemTextures_{};
+    std::array<GLuint, 16> shulkerItemTextures_{};
     std::array<int, 256> charWidths_{};
     ItemStack cursorStack_{};
     CreativeTab selectedCreativeTab_ = CreativeTab::BuildingBlocks;
     std::string searchText_;
+    bool searchFocused_ = false;
     int creativeScrollRow_ = 0;
+    std::optional<BlockEntityAction> activeBlockEntityAction_;
+    int signEditLine_ = 0;
+    bool screenCloseRequested_ = false;
 };

@@ -23,6 +23,7 @@
 #include "player/BlockInteraction.hpp"
 #include "player/Player.hpp"
 #include "rendering/DebugRenderer.hpp"
+#include "rendering/BlockEntityRenderer.hpp"
 #include "rendering/BiomeColors.hpp"
 #include "rendering/BlockRenderResources.hpp"
 #include "rendering/EnvironmentRenderer.hpp"
@@ -31,6 +32,7 @@
 #include "rendering/WorldRenderer.hpp"
 #include "world/Raycast.hpp"
 #include "world/World.hpp"
+#include "world/BlockEntitySystem.hpp"
 #include "worldgen/ChunkStreamer.hpp"
 #include "worldgen/WorldConfig.hpp"
 
@@ -200,13 +202,16 @@ int main() {
         BlockRenderResources blockRenderResources(BLOCKCRAFT_ASSET_ROOT);
         TextureAtlas atlas(blockRenderResources.atlas());
         ItemRegistry itemRegistry(BLOCKCRAFT_ASSET_ROOT);
+        BlockEntitySystem blockEntities;
+        blockEntities.scanLoadedWorld(world);
         WorldRenderer worldRenderer(world, atlas, blockRenderResources, chunkStreamer.workers());
         Environment environment(config);
         EnvironmentRenderer environmentRenderer(environment);
         DebugRenderer debugRenderer(blockRenderResources);
-        GameHud gameHud(window, BLOCKCRAFT_ASSET_ROOT, atlas, itemRegistry);
+        GameHud gameHud(window, BLOCKCRAFT_ASSET_ROOT, atlas, itemRegistry, blockRenderResources, blockEntities);
+        BlockEntityRenderer blockEntityRenderer(BLOCKCRAFT_ASSET_ROOT, blockEntities);
         Player player({0.5, spawnHeight(world, 0, 0), 0.5});
-        BlockInteraction interaction(itemRegistry);
+        BlockInteraction interaction(itemRegistry, blockEntities);
         camera.setPosition(player.eyePosition());
         updateWindowTitle(window, player, itemRegistry, config, 0.0, world.chunkCount(),
                           chunkStreamer, lightingEngine, worldRenderer);
@@ -241,6 +246,7 @@ int main() {
             if (escapeDown && !escapeWasDown) {
                 if (inventoryOpen) {
                     inventoryOpen = false;
+                    gameHud.closeBlockEntityScreen();
                     setCursorCaptured(window, true);
                 } else {
                     paused = !paused;
@@ -252,8 +258,14 @@ int main() {
             escapeWasDown = escapeDown;
 
             const bool eDown = keyDown(window, GLFW_KEY_E);
-            if (eDown && !eWasDown && !paused) {
-                inventoryOpen = !inventoryOpen;
+            if (eDown && !eWasDown && !paused && !gameHud.capturesTextInput()) {
+                if (inventoryOpen && gameHud.hasBlockEntityScreen()) {
+                    gameHud.closeBlockEntityScreen();
+                    inventoryOpen = false;
+                } else {
+                    gameHud.closeBlockEntityScreen();
+                    inventoryOpen = !inventoryOpen;
+                }
                 setCursorCaptured(window, !inventoryOpen);
                 jumpPressPending = false;
             }
@@ -299,7 +311,27 @@ int main() {
                         interaction.tick(world, lightingEngine, worldRenderer, player, camera.front(),
                                          glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS,
                                          glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS);
+                        if (const auto action = interaction.takeBlockEntityAction()) {
+                            if (action->type == BlockEntityActionType::OpenChest ||
+                                action->type == BlockEntityActionType::OpenShulker ||
+                                action->type == BlockEntityActionType::EditSign) {
+                                gameHud.openBlockEntityScreen(*action);
+                                inventoryOpen = true;
+                                setCursorCaptured(window, false);
+                            }
+                            if (action->type == BlockEntityActionType::Sleep) {
+                                // In a single-player world with no hostile-entity system yet,
+                                // EntityPlayer#trySleep's only meaningful Stage 7 gate is night.
+                                // Advance to the next vanilla day boundary when sleeping at night.
+                                const double dayTime = std::fmod(environment.worldTime(), 24000.0);
+                                if (dayTime >= 12541.0 && dayTime < 23460.0) {
+                                    const double nextDay = (std::floor(environment.worldTime() / 24000.0) + 1.0) * 24000.0;
+                                    environment.setWorldTime(nextDay);
+                                }
+                            }
+                        }
                     }
+                    blockEntities.tick(world);
                     environment.tick(world);
                     jumpPressPending = false;
                     accumulator -= tickDuration;
@@ -324,6 +356,7 @@ int main() {
             for (const ChunkCoordinate coordinate : streamChanges.loaded) {
                 lightingEngine.chunkLoaded(coordinate.x, coordinate.z);
                 worldRenderer.chunkLoaded(coordinate.x, coordinate.z);
+                blockEntities.scanChunk(world, coordinate.x, coordinate.z);
             }
             const std::vector<LightingChange> lightChanges = lightingEngine.process(
                 player.feetPosition().x, player.feetPosition().z, config.lightMainThreadBudgetMs);
@@ -348,6 +381,7 @@ int main() {
                 const glm::mat4 view = camera.viewMatrix();
                 environmentRenderer.renderSky(environmentFrame, camera.position(), view, projection);
                 worldRenderer.render(view, projection, environmentFrame);
+                blockEntityRenderer.render(world, view, projection, partialTick);
                 environmentRenderer.renderClouds(environmentFrame, camera.position(), view, projection);
                 environmentRenderer.renderWeather(environmentFrame, world, camera.position(), view, projection);
 
@@ -382,6 +416,10 @@ int main() {
                            framebufferWidth, framebufferHeight, displayedFps,
                            showDebug, paused, inventoryOpen);
             gameHud.endFrame();
+            if (gameHud.consumeScreenCloseRequest()) {
+                inventoryOpen = false;
+                setCursorCaptured(window, true);
+            }
 
             glfwSwapBuffers(window);
 

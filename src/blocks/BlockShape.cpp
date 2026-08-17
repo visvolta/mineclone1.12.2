@@ -574,6 +574,24 @@ BlockShapeSet shapeFor(const World& world, BlockState state, int x, int y, int z
         result.add({0.0,0.0,0.0,1.0,0.5625,1.0});
         return result;
     }
+    if (id == BlockId::Chest || id == BlockId::TrappedChest) {
+        // BlockChest bounding boxes: 14/16 wide and 14/16 tall, extending to
+        // the shared edge for a double chest.
+        const auto same = [&](int dx, int dz) {
+            return static_cast<BlockId>(blockId(world.getBlock(x + dx, y, z + dz))) == id;
+        };
+        double minX = 0.0625, maxX = 0.9375, minZ = 0.0625, maxZ = 0.9375;
+        if (same(-1,0)) minX = 0.0;
+        else if (same(1,0)) maxX = 1.0;
+        else if (same(0,-1)) minZ = 0.0;
+        else if (same(0,1)) maxZ = 1.0;
+        result.add({minX,0.0,minZ,maxX,0.875,maxZ});
+        return result;
+    }
+    if (id == BlockId::StandingSign || id == BlockId::WallSign) {
+        if (!collision) result.add({0.25,0.0,0.25,0.75,1.0,0.75});
+        return result;
+    }
     if (id == BlockId::Anvil) {
         const bool axisX = (blockMetadata(state) & 1U) != 0U;
         result.add(axisX ? BlockBox{0.0,0.0,0.125,1.0,1.0,0.875}

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(Blockcraft VERSION 0.11.0 LANGUAGES C CXX)
+project(Blockcraft VERSION 0.12.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -225,6 +225,7 @@ set(BLOCKCRAFT_CORE_SOURCES
     src/items/ItemRegistry.cpp
     src/world/Chunk.cpp
     src/world/World.cpp
+    src/world/BlockEntitySystem.cpp
     src/rendering/ChunkMesher.cpp
     src/rendering/TextureAtlasData.cpp
     src/rendering/ModelLoader.cpp
@@ -248,6 +249,7 @@ add_executable(blockcraft
     src/player/BlockInteraction.cpp
     src/rendering/Shader.cpp
     src/rendering/DebugRenderer.cpp
+    src/rendering/BlockEntityRenderer.cpp
     src/rendering/EnvironmentRenderer.cpp
     src/rendering/GameHud.cpp
     src/rendering/TextureAtlas.cpp
@@ -344,6 +346,22 @@ if(BUILD_TESTING)
         target_compile_options(blockcraft_placement_rules_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
     endif()
     add_test(NAME blockcraft_placement_rules COMMAND blockcraft_placement_rules_tests)
+
+    add_executable(blockcraft_block_entity_tests
+        tests/BlockEntityTests.cpp
+        src/blocks/BlockRegistry.cpp
+        src/world/Chunk.cpp
+        src/world/World.cpp
+        src/world/BlockEntitySystem.cpp
+    )
+    target_include_directories(blockcraft_block_entity_tests PRIVATE src)
+    target_link_libraries(blockcraft_block_entity_tests PRIVATE glm::glm)
+    if(MSVC)
+        target_compile_options(blockcraft_block_entity_tests PRIVATE /W4 /permissive- /UNDEBUG)
+    else()
+        target_compile_options(blockcraft_block_entity_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
+    endif()
+    add_test(NAME blockcraft_block_entities COMMAND blockcraft_block_entity_tests)
 endif()
 
 set_property(DIRECTORY PROPERTY VS_STARTUP_PROJECT blockcraft)

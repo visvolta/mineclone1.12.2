@@ -43,7 +43,7 @@ echo Using build directory: %CD%\build
 echo.
 "%CMAKE_EXE%" -S . -B build -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTING=ON -DBLOCKCRAFT_REQUIRE_MINECRAFT_ASSETS=ON
 if errorlevel 1 goto :failed
-"%CMAKE_EXE%" --build build --config Release --target blockcraft blockcraft_tests blockcraft_registry_tests blockcraft_foundation_tests blockcraft_rendering_parity_tests blockcraft_item_inventory_tests blockcraft_foundation_tests --parallel --clean-first
+"%CMAKE_EXE%" --build build --config Release --target blockcraft blockcraft_tests blockcraft_registry_tests blockcraft_foundation_tests blockcraft_rendering_parity_tests blockcraft_item_inventory_tests blockcraft_placement_rules_tests blockcraft_block_entity_tests --parallel --clean-first
 if errorlevel 1 goto :failed
 "%CTEST_EXE%" --test-dir build -C Release --output-on-failure
 if errorlevel 1 goto :failed

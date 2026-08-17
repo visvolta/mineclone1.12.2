@@ -1,0 +1,275 @@
+#include "world/BlockEntitySystem.hpp"
+
+#include <algorithm>
+#include <stdexcept>
+
+#include "blocks/BlockRegistry.hpp"
+#include "world/Chunk.hpp"
+#include "world/Raycast.hpp"
+#include "world/World.hpp"
+
+namespace {
+
+bool isShulker(BlockId id) {
+    const auto value = static_cast<std::uint16_t>(id);
+    return value >= static_cast<std::uint16_t>(BlockId::WhiteShulkerBox) &&
+           value <= static_cast<std::uint16_t>(BlockId::BlackShulkerBox);
+}
+
+bool isChest(BlockId id) {
+    return id == BlockId::Chest || id == BlockId::TrappedChest;
+}
+
+glm::ivec3 facingOffset(std::uint8_t metadata) {
+    // EnumFacing#getIndex: DOWN, UP, NORTH, SOUTH, WEST, EAST.
+    switch (metadata & 7U) {
+        case 0: return {0, -1, 0};
+        case 1: return {0, 1, 0};
+        case 2: return {0, 0, -1};
+        case 3: return {0, 0, 1};
+        case 4: return {-1, 0, 0};
+        case 5: return {1, 0, 0};
+        default: return {0, 1, 0};
+    }
+}
+
+bool normalCube(BlockState state) {
+    if (blockId(state) == 0) return false;
+    const BlockDefinition& definition = BlockRegistry::get(state);
+    return definition.opaque && definition.fullCube;
+}
+
+} // namespace
+
+std::uint64_t BlockEntitySystem::key(const glm::ivec3& p) {
+    // Minecraft coordinates used by this project are far inside these signed
+    // ranges; bias and pack to keep lookups allocation-free.
+    const std::uint64_t x = static_cast<std::uint64_t>(static_cast<std::int64_t>(p.x) + 0x2000000LL) & 0x3FFFFFFULL;
+    const std::uint64_t z = static_cast<std::uint64_t>(static_cast<std::int64_t>(p.z) + 0x2000000LL) & 0x3FFFFFFULL;
+    const std::uint64_t y = static_cast<std::uint64_t>(p.y) & 0xFFFULL;
+    return (x << 38U) | (z << 12U) | y;
+}
+
+std::optional<RuntimeBlockEntityType> BlockEntitySystem::typeFor(BlockState state) {
+    const BlockId id = static_cast<BlockId>(blockId(state));
+    if (id == BlockId::Chest) return RuntimeBlockEntityType::Chest;
+    if (id == BlockId::TrappedChest) return RuntimeBlockEntityType::TrappedChest;
+    if (id == BlockId::StandingSign || id == BlockId::WallSign) return RuntimeBlockEntityType::Sign;
+    if (id == BlockId::Bed) return RuntimeBlockEntityType::Bed;
+    if (isShulker(id)) return RuntimeBlockEntityType::ShulkerBox;
+    return std::nullopt;
+}
+
+void BlockEntitySystem::ensure(const glm::ivec3& position, BlockState state) {
+    const auto type = typeFor(state);
+    if (!type) return;
+    const auto k = key(position);
+    const auto found = entities_.find(k);
+    if (found != entities_.end()) {
+        found->second.state = state;
+        return;
+    }
+    RuntimeBlockEntity entity;
+    entity.type = *type;
+    entity.position = position;
+    entity.state = state;
+    if (entity.type == RuntimeBlockEntityType::ShulkerBox) {
+        const int numeric = static_cast<int>(blockId(state));
+        entity.color = static_cast<std::uint8_t>(std::clamp(numeric - static_cast<int>(BlockId::WhiteShulkerBox), 0, 15));
+    }
+    entities_.emplace(k, std::move(entity));
+}
+
+void BlockEntitySystem::scanChunk(const World& world, int chunkX, int chunkZ) {
+    const Chunk* chunk = world.findChunk(chunkX, chunkZ);
+    if (chunk == nullptr) return;
+    for (int y = 0; y < chunkHeight; ++y) {
+        for (int z = 0; z < chunkSize; ++z) {
+            for (int x = 0; x < chunkSize; ++x) {
+                const BlockState state = chunk->get(x, y, z);
+                if (!typeFor(state)) continue;
+                ensure({chunkX * 16 + x, y, chunkZ * 16 + z}, state);
+            }
+        }
+    }
+}
+
+void BlockEntitySystem::scanLoadedWorld(const World& world) {
+    for (const auto& [unused, chunk] : world.chunks()) {
+        (void)unused;
+        if (chunk) scanChunk(world, chunk->x(), chunk->z());
+    }
+}
+
+void BlockEntitySystem::blockChanged(const World&, const glm::ivec3& position,
+                                     BlockState oldState, BlockState newState) {
+    const auto oldType = typeFor(oldState);
+    const auto newType = typeFor(newState);
+    if (!newType) {
+        if (oldType) entities_.erase(key(position));
+        return;
+    }
+    if (!oldType || *oldType != *newType) entities_.erase(key(position));
+    ensure(position, newState);
+}
+
+void BlockEntitySystem::placedFromItem(const glm::ivec3& position, BlockState state,
+                                       const ItemStack& stack) {
+    ensure(position, state);
+    RuntimeBlockEntity* entity = find(position);
+    if (entity == nullptr) return;
+    if (entity->type == RuntimeBlockEntityType::Bed)
+        entity->color = static_cast<std::uint8_t>(stack.damage & 15U);
+}
+
+RuntimeBlockEntity* BlockEntitySystem::find(const glm::ivec3& position) {
+    const auto it = entities_.find(key(position));
+    return it == entities_.end() ? nullptr : &it->second;
+}
+
+const RuntimeBlockEntity* BlockEntitySystem::find(const glm::ivec3& position) const {
+    const auto it = entities_.find(key(position));
+    return it == entities_.end() ? nullptr : &it->second;
+}
+
+std::optional<glm::ivec3> BlockEntitySystem::pairedChest(const World& world,
+                                                         const glm::ivec3& position) const {
+    const BlockId id = static_cast<BlockId>(blockId(world.getBlock(position.x, position.y, position.z)));
+    if (!isChest(id)) return std::nullopt;
+    constexpr std::array<glm::ivec3, 4> offsets = {
+        glm::ivec3{-1,0,0}, glm::ivec3{1,0,0}, glm::ivec3{0,0,-1}, glm::ivec3{0,0,1}
+    };
+    for (const glm::ivec3& d : offsets) {
+        const glm::ivec3 p = position + d;
+        if (static_cast<BlockId>(blockId(world.getBlock(p.x, p.y, p.z))) == id) return p;
+    }
+    return std::nullopt;
+}
+
+std::optional<BlockEntityAction> BlockEntitySystem::activate(const World& world,
+                                                             const RaycastHit& hit) const {
+    const BlockId id = static_cast<BlockId>(blockId(hit.state));
+    if (isChest(id)) {
+        // BlockChest#getContainer rejects a chest when either half has a normal
+        // cube immediately above it. Cats are intentionally absent until the
+        // entity/AI stage, but the block obstruction rule is implemented now.
+        const auto blockedAbove = [&](const glm::ivec3& p) {
+            return normalCube(world.getBlock(p.x, p.y + 1, p.z));
+        };
+        if (blockedAbove(hit.block)) return std::nullopt;
+        if (const auto pair = pairedChest(world, hit.block); pair && blockedAbove(*pair))
+            return std::nullopt;
+        return BlockEntityAction{BlockEntityActionType::OpenChest, hit.block};
+    }
+    if (id == BlockId::Bed)
+        return BlockEntityAction{BlockEntityActionType::Sleep, hit.block};
+    if (isShulker(id)) {
+        // A closed shulker may open only when the half-block lid sweep in its
+        // facing direction is unobstructed. With the current block-only world,
+        // a normal cube in the adjacent cell is the relevant obstruction.
+        const glm::ivec3 d = facingOffset(blockMetadata(hit.state));
+        const glm::ivec3 adjacent = hit.block + d;
+        if (normalCube(world.getBlock(adjacent.x, adjacent.y, adjacent.z)))
+            return std::nullopt;
+        return BlockEntityAction{BlockEntityActionType::OpenShulker, hit.block};
+    }
+    return std::nullopt;
+}
+
+void BlockEntitySystem::beginViewing(const BlockEntityAction& action) {
+    RuntimeBlockEntity* entity = find(action.position);
+    if (entity == nullptr) return;
+    if (entity->type == RuntimeBlockEntityType::Chest || entity->type == RuntimeBlockEntityType::TrappedChest ||
+        entity->type == RuntimeBlockEntityType::ShulkerBox)
+        ++entity->viewers;
+}
+
+void BlockEntitySystem::endViewing(const BlockEntityAction& action) {
+    RuntimeBlockEntity* entity = find(action.position);
+    if (entity == nullptr) return;
+    if (entity->type == RuntimeBlockEntityType::Chest || entity->type == RuntimeBlockEntityType::TrappedChest ||
+        entity->type == RuntimeBlockEntityType::ShulkerBox)
+        entity->viewers = std::max(0, entity->viewers - 1);
+}
+
+void BlockEntitySystem::tick(const World&) {
+    for (auto& [unused, entity] : entities_) {
+        (void)unused;
+        entity.previousAnimation = entity.animation;
+        if (entity.type == RuntimeBlockEntityType::Chest || entity.type == RuntimeBlockEntityType::TrappedChest) {
+            if (entity.viewers > 0 && entity.animation < 1.0F) entity.animation += 0.1F;
+            else if (entity.viewers == 0 && entity.animation > 0.0F) entity.animation -= 0.1F;
+        } else if (entity.type == RuntimeBlockEntityType::ShulkerBox) {
+            if (entity.viewers > 0 && entity.animation < 1.0F) entity.animation += 0.1F;
+            else if (entity.viewers == 0 && entity.animation > 0.0F) entity.animation -= 0.1F;
+        }
+        entity.animation = std::clamp(entity.animation, 0.0F, 1.0F);
+    }
+}
+
+int BlockEntitySystem::containerSlotCount(const World& world, const glm::ivec3& position) const {
+    const RuntimeBlockEntity* entity = find(position);
+    if (entity == nullptr) return 0;
+    if (entity->type == RuntimeBlockEntityType::ShulkerBox) return 27;
+    if (entity->type == RuntimeBlockEntityType::Chest || entity->type == RuntimeBlockEntityType::TrappedChest)
+        return pairedChest(world, position) ? 54 : 27;
+    return 0;
+}
+
+ItemStack& BlockEntitySystem::containerSlot(const World& world, const glm::ivec3& position, int index) {
+    RuntimeBlockEntity* clicked = find(position);
+    if (clicked == nullptr) throw std::out_of_range("Block entity container is missing");
+    if (index < 0) throw std::out_of_range("Negative container slot");
+    if (clicked->type == RuntimeBlockEntityType::ShulkerBox) {
+        if (index >= 27) throw std::out_of_range("Container slot outside shulker box");
+        return clicked->inventory[static_cast<std::size_t>(index)];
+    }
+
+    const auto pair = pairedChest(world, position);
+    if (!pair) {
+        if (index >= 27) throw std::out_of_range("Container slot outside chest");
+        return clicked->inventory[static_cast<std::size_t>(index)];
+    }
+    if (index >= 54) throw std::out_of_range("Container slot outside large chest");
+    RuntimeBlockEntity* adjacent = find(*pair);
+    if (adjacent == nullptr) throw std::out_of_range("Adjacent chest block entity is missing");
+
+    // InventoryLargeChest places the west/north half first and east/south half
+    // second. Keep slot order stable regardless of which half the player used.
+    const bool pairFirst = pair->x < position.x || pair->z < position.z;
+    RuntimeBlockEntity* first = pairFirst ? adjacent : clicked;
+    RuntimeBlockEntity* second = pairFirst ? clicked : adjacent;
+    return index < 27 ? first->inventory[static_cast<std::size_t>(index)]
+                      : second->inventory[static_cast<std::size_t>(index - 27)];
+}
+
+const ItemStack& BlockEntitySystem::containerSlot(const World& world, const glm::ivec3& position, int index) const {
+    return const_cast<BlockEntitySystem*>(this)->containerSlot(world, position, index);
+}
+
+std::string BlockEntitySystem::containerTitle(const World& world, const glm::ivec3& position) const {
+    const RuntimeBlockEntity* entity = find(position);
+    if (entity == nullptr) return "Container";
+    if (entity->type == RuntimeBlockEntityType::ShulkerBox) return "Shulker Box";
+    if (entity->type == RuntimeBlockEntityType::TrappedChest)
+        return pairedChest(world, position) ? "Large Trapped Chest" : "Trapped Chest";
+    if (entity->type == RuntimeBlockEntityType::Chest)
+        return pairedChest(world, position) ? "Large Chest" : "Chest";
+    return "Container";
+}
+
+std::array<std::string, 4>* BlockEntitySystem::signLines(const glm::ivec3& position) {
+    RuntimeBlockEntity* entity = find(position);
+    return entity != nullptr && entity->type == RuntimeBlockEntityType::Sign ? &entity->signText : nullptr;
+}
+
+const std::array<std::string, 4>* BlockEntitySystem::signLines(const glm::ivec3& position) const {
+    const RuntimeBlockEntity* entity = find(position);
+    return entity != nullptr && entity->type == RuntimeBlockEntityType::Sign ? &entity->signText : nullptr;
+}
+
+float BlockEntitySystem::animation(const glm::ivec3& position, float partialTick) const {
+    const RuntimeBlockEntity* entity = find(position);
+    if (entity == nullptr) return 0.0F;
+    return entity->previousAnimation + (entity->animation - entity->previousAnimation) * partialTick;
+}

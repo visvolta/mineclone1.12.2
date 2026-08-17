@@ -164,6 +164,9 @@ std::vector<std::uint16_t> creativeMetadata(const ItemDefinition& item) {
     else if (item.id == 349) range(4);
     else if (item.id == 350) range(2);
     else if (item.id == 351) range(16);
+    else if (item.id == 355) range(16);
+    else if (item.id == 397) range(6);
+    else if (item.id == 425) range(16);
     return values;
 }
 } // namespace
@@ -298,10 +301,13 @@ std::vector<ItemStack> ItemRegistry::searchStacks(std::string_view text) const {
     const std::string needle = lower(std::string(text));
     std::vector<ItemStack> result;
     for (const ItemDefinition& item : items_) {
-        if (!needle.empty() && lower(item.name).find(needle) == std::string::npos &&
-            lower(item.displayName).find(needle) == std::string::npos) continue;
-        for (std::uint16_t meta : creativeMetadata(item))
-            result.push_back({item.id, item.maxStackSize, meta, {}});
+        for (std::uint16_t meta : creativeMetadata(item)) {
+            ItemStack stack{item.id, item.maxStackSize, meta, {}};
+            if (!needle.empty() && lower(item.name).find(needle) == std::string::npos &&
+                lower(item.displayName).find(needle) == std::string::npos &&
+                lower(stackDisplayName(stack)).find(needle) == std::string::npos) continue;
+            result.push_back(std::move(stack));
+        }
     }
     return result;
 }
@@ -315,14 +321,37 @@ std::string ItemRegistry::stackDisplayName(const ItemStack& stack) const {
             "Gray","Pink","Lime","Yellow","Light Blue","Magenta","Orange","White"};
         return names[std::min<std::size_t>(value, 15)];
     };
+    const auto localized = [&](std::string_view key, std::string_view fallback) {
+        const auto found = language_.find(std::string(key));
+        return found != language_.end() ? found->second : std::string(fallback);
+    };
     if (item.id == 263) return meta == 1 ? "Charcoal" : "Coal";
     if (item.id == 322) return meta == 1 ? "Enchanted Golden Apple" : "Golden Apple";
+    if (item.id == 355) {
+        constexpr std::array<std::string_view,16> keys={"white","orange","magenta","lightBlue","yellow","lime","pink","gray","silver","cyan","purple","blue","brown","green","red","black"};
+        constexpr std::array<std::string_view,16> fallback={"White Bed","Orange Bed","Magenta Bed","Light Blue Bed","Yellow Bed","Lime Bed","Pink Bed","Gray Bed","Light Gray Bed","Cyan Bed","Purple Bed","Blue Bed","Brown Bed","Green Bed","Red Bed","Black Bed"};
+        const std::size_t i=std::min<std::size_t>(meta,15);
+        const std::string key="item.bed."+std::string(keys[i])+".name";
+        return localized(key, fallback[i]);
+    }
+    if (item.id == 397) {
+        constexpr std::array<std::string_view, 6> skulls = {
+            "Skeleton Skull", "Wither Skeleton Skull", "Zombie Head",
+            "Player Head", "Creeper Head", "Dragon Head"
+        };
+        return std::string(skulls[std::min<std::size_t>(meta, 5)]);
+    }
+    if (item.id == 425) return std::string(color(15U-meta)) + " Banner";
     if (item.id == 349) {
         constexpr std::array<std::string_view, 4> names = {"Raw Fish", "Raw Salmon", "Clownfish", "Pufferfish"};
         return std::string(names[std::min<std::size_t>(meta, 3)]);
     }
     if (item.id == 350) return meta == 1 ? "Cooked Salmon" : "Cooked Fish";
-    if (item.id == 351) return std::string(color(meta)) + " Dye";
+    if (item.id == 351) {
+        constexpr std::array<std::string_view,16> keys={"black","red","green","brown","blue","purple","cyan","silver","gray","pink","lime","yellow","lightBlue","magenta","orange","white"};
+        const std::string key="item.dyePowder."+std::string(keys[std::min<std::size_t>(meta,15)])+".name";
+        return localized(key, std::string(color(meta))+" Dye");
+    }
     if (!item.placedBlock) return item.displayName;
     switch (*item.placedBlock) {
         case BlockId::Stone: {
@@ -335,9 +364,13 @@ std::string ItemRegistry::stackDisplayName(const ItemStack& stack) const {
         }
         case BlockId::Planks: case BlockId::Sapling: case BlockId::WoodenSlab: {
             constexpr std::array<std::string_view,6> wood={"Oak","Spruce","Birch","Jungle","Acacia","Dark Oak"};
-            const std::string suffix = *item.placedBlock == BlockId::Sapling ? " Sapling" :
-                (*item.placedBlock == BlockId::WoodenSlab ? " Wood Slab" : " Wood Planks");
-            return std::string(wood[std::min<std::size_t>(meta,5)]) + suffix;
+            const std::size_t i=std::min<std::size_t>(meta,5);
+            if (*item.placedBlock == BlockId::WoodenSlab) {
+                constexpr std::array<std::string_view,6> keys={"oak","spruce","birch","jungle","acacia","big_oak"};
+                return localized("tile.woodSlab."+std::string(keys[i])+".name", std::string(wood[i])+" Wood Slab");
+            }
+            const std::string suffix = *item.placedBlock == BlockId::Sapling ? " Sapling" : " Wood Planks";
+            return std::string(wood[i]) + suffix;
         }
         case BlockId::Sand: return meta == 1 ? "Red Sand" : "Sand";
         case BlockId::Sponge: return meta == 1 ? "Wet Sponge" : "Sponge";
@@ -360,6 +393,29 @@ std::string ItemRegistry::stackDisplayName(const ItemStack& stack) const {
         case BlockId::StoneBrick: {
             constexpr std::array<std::string_view,4> n={"Stone Bricks","Mossy Stone Bricks","Cracked Stone Bricks","Chiseled Stone Bricks"};
             return std::string(n[std::min<std::size_t>(meta,3)]);
+        }
+        case BlockId::StoneSlab: {
+            constexpr std::array<std::string_view,8> suffix={"stone","sand","wood","cobble","brick","smoothStoneBrick","netherBrick","quartz"};
+            constexpr std::array<std::string_view,8> fallback={"Stone Slab","Sandstone Slab","Wooden Slab","Cobblestone Slab","Bricks Slab","Stone Bricks Slab","Nether Brick Slab","Quartz Slab"};
+            const std::size_t i=std::min<std::size_t>(meta,7);
+            return localized("tile.stoneSlab."+std::string(suffix[i])+".name", fallback[i]);
+        }
+        case BlockId::StoneSlab2: return localized("tile.stoneSlab2.red_sandstone.name", "Red Sandstone Slab");
+        case BlockId::Log: case BlockId::Leaves: {
+            constexpr std::array<std::string_view,4> wood={"Oak","Spruce","Birch","Jungle"};
+            return std::string(wood[std::min<std::size_t>(meta&3U,3)]) + (*item.placedBlock==BlockId::Log ? " Wood" : " Leaves");
+        }
+        case BlockId::Log2: case BlockId::Leaves2: {
+            constexpr std::array<std::string_view,2> wood={"Acacia","Dark Oak"};
+            return std::string(wood[std::min<std::size_t>(meta&1U,1)]) + (*item.placedBlock==BlockId::Log2 ? " Wood" : " Leaves");
+        }
+        case BlockId::Anvil: {
+            constexpr std::array<std::string_view,3> n={"Anvil","Slightly Damaged Anvil","Very Damaged Anvil"};
+            return std::string(n[std::min<std::size_t>(meta,2)]);
+        }
+        case BlockId::MonsterEgg: {
+            constexpr std::array<std::string_view,6> n={"Stone Monster Egg","Cobblestone Monster Egg","Stone Brick Monster Egg","Mossy Stone Brick Monster Egg","Cracked Stone Brick Monster Egg","Chiseled Stone Brick Monster Egg"};
+            return std::string(n[std::min<std::size_t>(meta,5)]);
         }
         case BlockId::RedFlower: {
             constexpr std::array<std::string_view,9> n={"Poppy","Blue Orchid","Allium","Azure Bluet","Red Tulip","Orange Tulip","White Tulip","Pink Tulip","Oxeye Daisy"};

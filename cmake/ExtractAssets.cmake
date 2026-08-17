@@ -93,7 +93,17 @@ set(required_jar_resources
     "assets/minecraft/textures/gui/container/creative_inventory/tab_items.png"
     "assets/minecraft/textures/gui/container/creative_inventory/tab_item_search.png"
     "assets/minecraft/textures/gui/container/creative_inventory/tab_inventory.png"
+    "assets/minecraft/textures/gui/container/generic_54.png"
     "assets/minecraft/textures/gui/widgets.png"
+    "assets/minecraft/textures/entity/chest/normal.png"
+    "assets/minecraft/textures/entity/chest/normal_double.png"
+    "assets/minecraft/textures/entity/chest/trapped.png"
+    "assets/minecraft/textures/entity/chest/trapped_double.png"
+    "assets/minecraft/textures/entity/sign.png"
+    "assets/minecraft/textures/entity/bed/red.png"
+    "assets/minecraft/textures/entity/bed/white.png"
+    "assets/minecraft/textures/entity/shulker/shulker_white.png"
+    "assets/minecraft/textures/entity/shulker/shulker_black.png"
     "assets/minecraft/textures/items/apple.png"
 )
 

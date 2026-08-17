@@ -47,6 +47,9 @@ public:
                                           const glm::vec3& lookDirection, float partialTick) const;
     [[nodiscard]] PrecipitationType precipitationAt(const World& world, int x, int y, int z) const;
     [[nodiscard]] double worldTime() const { return worldTime_; }
+    // Single-player bed completion uses the same 24000-tick world clock as
+    // Minecraft 1.12.2. Persistence of this value belongs to the save stage.
+    void setWorldTime(double value) { worldTime_ = value; }
 
     [[nodiscard]] static float celestialAngle(double worldTime);
     [[nodiscard]] static float starBrightness(float angle);

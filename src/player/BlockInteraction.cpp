@@ -21,7 +21,9 @@ bool samePosition(const glm::ivec3& a, const glm::ivec3& b) {
 void BlockInteraction::commitEdit(World& world, LightingEngine& lighting,
                                   WorldRenderer& renderer, const glm::ivec3& position,
                                   BlockState state) {
+    const BlockState oldState = world.getBlock(position.x, position.y, position.z);
     world.setBlock(position.x, position.y, position.z, state);
+    blockEntities_.blockChanged(world, position, oldState, state);
     const std::vector<LightingChange> changes =
         lighting.blockChangedSync(position.x, position.y, position.z);
     renderer.blockChangedSync(position.x, position.y, position.z, changes);
@@ -76,15 +78,26 @@ void BlockInteraction::tick(World& world, LightingEngine& lighting, WorldRendere
     const auto hit = raycastBlocks(world, player.eyePosition(), lookDirection, reach);
 
     if (usingBlock && useDelay_ == 0 && hit) {
-        // PlayerControllerMP first offers the clicked block an activation before
-        // falling through to the held ItemStack's onItemUse path.
-        if (const auto activation = placement_.activation(world, player, lookDirection, *hit)) {
+        // Tile-entity/container activation takes the same precedence as
+        // Block#onBlockActivated in PlayerControllerMP.
+        if (const auto blockEntityAction = blockEntities_.activate(world, *hit)) {
+            pendingBlockEntityAction_ = blockEntityAction;
+            useDelay_ = 4;
+        } else if (const auto activation = placement_.activation(world, player, lookDirection, *hit)) {
             applyPlan(world, lighting, renderer, *activation);
             useDelay_ = 4;
         } else {
             ItemStack& held = player.inventory().selected();
+            const ItemStack placedStack = held;
             if (const auto plan = placement_.placement(world, player, lookDirection, *hit, held)) {
                 applyPlan(world, lighting, renderer, *plan);
+                for (const PlannedBlockChange& edit : plan->changes) {
+                    blockEntities_.placedFromItem(edit.position, edit.state, placedStack);
+                    const BlockId placedId = static_cast<BlockId>(blockId(edit.state));
+                    if ((placedId == BlockId::StandingSign || placedId == BlockId::WallSign) &&
+                        !pendingBlockEntityAction_)
+                        pendingBlockEntityAction_ = BlockEntityAction{BlockEntityActionType::EditSign, edit.position};
+                }
                 if (plan->consumeItem && player.gameMode() != GameMode::Creative) held.shrink(1);
                 useDelay_ = 4;
             }

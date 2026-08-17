@@ -169,6 +169,25 @@ bool isFenceGate(BlockId id) {
 
 bool isButton(BlockId id) { return id == BlockId::StoneButton || id == BlockId::WoodenButton; }
 
+
+bool canPlaceChestAt(const World& world, BlockId id, const glm::ivec3& pos) {
+    constexpr std::array<glm::ivec3, 4> dirs = {
+        glm::ivec3{-1,0,0}, glm::ivec3{1,0,0}, glm::ivec3{0,0,-1}, glm::ivec3{0,0,1}
+    };
+    int adjacent = 0;
+    for (const glm::ivec3& d : dirs) {
+        const glm::ivec3 n = pos + d;
+        if (static_cast<BlockId>(blockId(world.getBlock(n.x,n.y,n.z))) != id) continue;
+        ++adjacent;
+        // BlockChest#canPlaceBlockAt rejects attaching to an already-double chest.
+        for (const glm::ivec3& d2 : dirs) {
+            const glm::ivec3 nn = n + d2;
+            if (nn.x == pos.x && nn.y == pos.y && nn.z == pos.z) continue;
+            if (static_cast<BlockId>(blockId(world.getBlock(nn.x,nn.y,nn.z))) == id) return false;
+        }
+    }
+    return adjacent <= 1;
+}
 bool isPressurePlate(BlockId id) {
     return id == BlockId::StonePressurePlate || id == BlockId::WoodenPressurePlate ||
            id == BlockId::LightWeightedPressurePlate || id == BlockId::HeavyWeightedPressurePlate;
@@ -658,8 +677,10 @@ std::optional<PlacementPlan> PlacementRules::placement(
             else if (eyeDelta < 0.0) meta = 0;  // DOWN
         }
         state = block(selected, meta);
-    } else if (selected == BlockId::Furnace || selected == BlockId::LitFurnace ||
-               selected == BlockId::Chest || selected == BlockId::TrappedChest) {
+    } else if (selected == BlockId::Furnace || selected == BlockId::LitFurnace) {
+        state = block(selected, cardinalMeta(opposite(facing)));
+    } else if (selected == BlockId::Chest || selected == BlockId::TrappedChest) {
+        if (!canPlaceChestAt(world, selected, target)) return std::nullopt;
         state = block(selected, cardinalMeta(opposite(facing)));
     } else if (isGlazed(selected)) {
         state = block(selected, horizontalMeta(opposite(facing)));

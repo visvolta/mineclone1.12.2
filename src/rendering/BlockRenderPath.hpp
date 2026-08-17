@@ -42,7 +42,7 @@ enum class BlockRenderPath : std::uint8_t {
         case BlockId::GreenShulkerBox:
         case BlockId::RedShulkerBox:
         case BlockId::BlackShulkerBox:
-            return BlockRenderPath::StaticCustomRenderer;
+            return BlockRenderPath::BlockEntityRenderer;
 
         case BlockId::Bed:
         case BlockId::PistonExtension:

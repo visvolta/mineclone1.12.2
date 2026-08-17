@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstdint>
 #include <filesystem>
 #include <map>
 #include <memory>
@@ -36,7 +37,7 @@ struct BakedBlockModel {
 struct BlockModelState {
     std::string resourceName;
     ModelProperties properties;
-    std::string variantName; // non-property variants such as double-slab "all"
+    std::string variantName;
 };
 
 class BlockModelManager {
@@ -46,6 +47,17 @@ public:
     [[nodiscard]] bool hasBlockState(std::string_view resourceName) const;
     [[nodiscard]] std::vector<const BakedBlockModel*> select(
         const BlockModelState& state, std::int64_t positionRandom) const;
+
+    // GUI ItemBlock rendering uses the actual assets/minecraft/models/item/*.json
+    // model, including inventory-only parents such as fence_inventory rather
+    // than guessing from an in-world blockstate with empty neighbours.
+    [[nodiscard]] const BakedBlockModel* itemModel(std::string_view resourceName) const {
+        std::string path(resourceName);
+        if (path.starts_with("minecraft:")) path.erase(0, 10);
+        if (path.starts_with("item/")) path.erase(0, 5);
+        const std::string canonical = normalizeModelName("minecraft:item/" + path, false);
+        return bakedModel(canonical, 0, 0, false).get();
+    }
 
 private:
     struct ModelApplication;

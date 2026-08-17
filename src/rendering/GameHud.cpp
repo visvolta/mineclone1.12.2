@@ -10,6 +10,8 @@
 #include <thread>
 
 #include <glm/geometric.hpp>
+#include <glm/ext/matrix_transform.hpp>
+#include <glm/vec4.hpp>
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
@@ -25,6 +27,8 @@
 #include "player/BlockInteraction.hpp"
 #include "player/Player.hpp"
 #include "rendering/BlockStateModelMap.hpp"
+#include "rendering/BlockRenderResources.hpp"
+#include "rendering/BlockRenderPath.hpp"
 #include "rendering/Camera.hpp"
 #include "rendering/TextureAtlas.hpp"
 #include "rendering/TextureAtlasData.hpp"
@@ -37,6 +41,76 @@ namespace {
 
 ImTextureID textureId(GLuint value) {
     return static_cast<ImTextureID>(value);
+}
+
+struct GuiEntityQuad {
+    std::array<glm::vec3,4> positions{};
+    std::array<glm::vec2,4> uvs{};
+    float shade = 1.0F;
+    float depth = 0.0F;
+};
+
+void appendGuiEntityFace(std::vector<GuiEntityQuad>& out,
+                         const std::array<glm::vec3,4>& positions,
+                         float u1, float v1, float u2, float v2,
+                         int textureWidth, int textureHeight, float shade) {
+    GuiEntityQuad quad;
+    quad.positions = positions;
+    quad.uvs = {{
+        {u2 / textureWidth, v1 / textureHeight},
+        {u1 / textureWidth, v1 / textureHeight},
+        {u1 / textureWidth, v2 / textureHeight},
+        {u2 / textureWidth, v2 / textureHeight}
+    }};
+    quad.shade = shade;
+    for (const glm::vec3& p : positions) quad.depth += p.z;
+    quad.depth *= 0.25F;
+    out.push_back(quad);
+}
+
+void appendGuiModelBox(std::vector<GuiEntityQuad>& out, int textureWidth, int textureHeight,
+                       int textureU, int textureV, float x, float y, float z,
+                       int dx, int dy, int dz, const glm::mat4& transform) {
+    const float x0=x/16.0F, y0=y/16.0F, z0=z/16.0F;
+    const float x1=(x+dx)/16.0F, y1=(y+dy)/16.0F, z1=(z+dz)/16.0F;
+    const auto t=[&](float X,float Y,float Z){
+        const glm::vec4 q=transform*glm::vec4(X,Y,Z,1.0F);
+        return glm::vec3(q);
+    };
+    const glm::vec3 p0=t(x0,y0,z0), p1=t(x1,y0,z0), p2=t(x1,y1,z0), p3=t(x0,y1,z0);
+    const glm::vec3 p4=t(x0,y0,z1), p5=t(x1,y0,z1), p6=t(x1,y1,z1), p7=t(x0,y1,z1);
+    // Same ModelBox/TexturedQuad unwrap used by 1.12.2.  GUI entity items are
+    // lit by RenderHelper; these restrained face factors mimic its readable
+    // three-dimensional presentation without reusing the world AO path.
+    appendGuiEntityFace(out,{p5,p1,p2,p6},textureU+dz+dx,textureV+dz,textureU+dz+dx+dz,textureV+dz+dy,textureWidth,textureHeight,0.78F);
+    appendGuiEntityFace(out,{p0,p4,p7,p3},textureU,textureV+dz,textureU+dz,textureV+dz+dy,textureWidth,textureHeight,0.78F);
+    appendGuiEntityFace(out,{p5,p4,p0,p1},textureU+dz,textureV,textureU+dz+dx,textureV+dz,textureWidth,textureHeight,0.70F);
+    appendGuiEntityFace(out,{p2,p3,p7,p6},textureU+dz+dx,textureV+dz,textureU+dz+dx+dx,textureV,textureWidth,textureHeight,1.0F);
+    appendGuiEntityFace(out,{p1,p0,p3,p2},textureU+dz,textureV+dz,textureU+dz+dx,textureV+dz+dy,textureWidth,textureHeight,0.88F);
+    appendGuiEntityFace(out,{p4,p5,p6,p7},textureU+dz+dx+dz,textureV+dz,textureU+dz+dx+dz+dx,textureV+dz+dy,textureWidth,textureHeight,0.88F);
+}
+
+void drawGuiEntityQuads(GLuint texture, std::vector<GuiEntityQuad> quads,
+                        float x, float y, int scaleFactor, float pixelsPerUnit = 13.0F) {
+    if (texture == 0 || quads.empty()) return;
+    std::sort(quads.begin(), quads.end(), [](const GuiEntityQuad& a, const GuiEntityQuad& b) {
+        return a.depth < b.depth;
+    });
+    ImDrawList* draw=ImGui::GetBackgroundDrawList();
+    const ImGuiIO& io=ImGui::GetIO();
+    const float sx=static_cast<float>(scaleFactor)/std::max(io.DisplayFramebufferScale.x,1.0e-6F);
+    const float sy=static_cast<float>(scaleFactor)/std::max(io.DisplayFramebufferScale.y,1.0e-6F);
+    for(const GuiEntityQuad& q:quads){
+        std::array<ImVec2,4> p{};
+        for(std::size_t i=0;i<4;++i)
+            p[i]=ImVec2((x+8.0F+q.positions[i].x*pixelsPerUnit)*sx,
+                        (y+8.0F-q.positions[i].y*pixelsPerUnit)*sy);
+        const int c=std::clamp(static_cast<int>(std::lround(q.shade*255.0F)),0,255);
+        draw->AddImageQuad(textureId(texture),p[0],p[1],p[2],p[3],
+            ImVec2(q.uvs[0].x,q.uvs[0].y),ImVec2(q.uvs[1].x,q.uvs[1].y),
+            ImVec2(q.uvs[2].x,q.uvs[2].y),ImVec2(q.uvs[3].x,q.uvs[3].y),
+            IM_COL32(c,c,c,255));
+    }
 }
 
 std::string biomeName(int id) {
@@ -83,8 +157,9 @@ std::string glString(GLenum name) {
 
 } // namespace
 
-GameHud::GameHud(GLFWwindow* window, const std::filesystem::path& assetRoot, TextureAtlas& blockAtlas, const ItemRegistry& items)
-    : window_(window), blockAtlas_(blockAtlas), items_(items) {
+GameHud::GameHud(GLFWwindow* window, const std::filesystem::path& assetRoot, TextureAtlas& blockAtlas, const ItemRegistry& items,
+                 const BlockRenderResources& resources, BlockEntitySystem& blockEntities)
+    : window_(window), blockAtlas_(blockAtlas), items_(items), resources_(resources), blockEntities_(blockEntities) {
     if (window_ == nullptr) throw std::invalid_argument("GameHud requires a GLFW window");
 
     IMGUI_CHECKVERSION();
@@ -116,9 +191,31 @@ GameHud::GameHud(GLFWwindow* window, const std::filesystem::path& assetRoot, Tex
         assetRoot / "assets/minecraft/textures/gui/container/creative_inventory/tab_inventory.png", 256, 256);
     creativeTabsTexture_ = loadExactTexture(
         assetRoot / "assets/minecraft/textures/gui/container/creative_inventory/tabs.png", 256, 256);
+    generic54Texture_ = loadExactTexture(
+        assetRoot / "assets/minecraft/textures/gui/container/generic_54.png", 256, 256);
+
+    const auto entityRoot = assetRoot / "assets/minecraft/textures/entity";
+    chestItemTexture_ = loadExactTexture(entityRoot / "chest/normal.png", 64, 64);
+    trappedChestItemTexture_ = loadExactTexture(entityRoot / "chest/trapped.png", 64, 64);
+    enderChestItemTexture_ = loadExactTexture(entityRoot / "chest/ender.png", 64, 64);
+    constexpr std::array<std::string_view,16> dyeNames = {
+        "white","orange","magenta","light_blue","yellow","lime","pink","gray",
+        "silver","cyan","purple","blue","brown","green","red","black"
+    };
+    for (std::size_t i = 0; i < dyeNames.size(); ++i) {
+        bedItemTextures_[i] = loadExactTexture(entityRoot / ("bed/" + std::string(dyeNames[i]) + ".png"), 64, 64);
+        shulkerItemTextures_[i] = loadExactTexture(entityRoot / ("shulker/shulker_" + std::string(dyeNames[i]) + ".png"), 64, 64);
+    }
 }
 
 GameHud::~GameHud() {
+    if (activeBlockEntityAction_) blockEntities_.endViewing(*activeBlockEntityAction_);
+    glDeleteTextures(static_cast<GLsizei>(bedItemTextures_.size()), bedItemTextures_.data());
+    glDeleteTextures(static_cast<GLsizei>(shulkerItemTextures_.size()), shulkerItemTextures_.data());
+    if (enderChestItemTexture_ != 0) glDeleteTextures(1, &enderChestItemTexture_);
+    if (trappedChestItemTexture_ != 0) glDeleteTextures(1, &trappedChestItemTexture_);
+    if (chestItemTexture_ != 0) glDeleteTextures(1, &chestItemTexture_);
+    if (generic54Texture_ != 0) glDeleteTextures(1, &generic54Texture_);
     if (creativeTabsTexture_ != 0) glDeleteTextures(1, &creativeTabsTexture_);
     if (creativeInventoryTexture_ != 0) glDeleteTextures(1, &creativeInventoryTexture_);
     if (creativeSearchTexture_ != 0) glDeleteTextures(1, &creativeSearchTexture_);
@@ -233,43 +330,192 @@ void GameHud::beginFrame() {
     ImGui::NewFrame();
 }
 
+bool GameHud::drawBuiltinEntityStack(const ItemStack& stack, float x, float y, int scaleFactor) const {
+    if (stack.empty()) return false;
+    const ItemDefinition& item = items_.get(stack.itemId);
+    const auto placed = item.placedBlock;
+    const bool isChest = placed && (*placed == BlockId::Chest || *placed == BlockId::TrappedChest || *placed == BlockId::EnderChest);
+    const bool isShulker = placed && static_cast<std::uint16_t>(*placed) >= static_cast<std::uint16_t>(BlockId::WhiteShulkerBox) &&
+                           static_cast<std::uint16_t>(*placed) <= static_cast<std::uint16_t>(BlockId::BlackShulkerBox);
+    const bool isBed = stack.itemId == 355 || (placed && *placed == BlockId::Bed);
+    if (!isChest && !isShulker && !isBed) return false;
+
+    std::vector<GuiEntityQuad> quads;
+    GLuint texture = 0;
+
+    if (isChest) {
+        glm::mat4 view(1.0F);
+        view=glm::rotate(view,glm::radians(30.0F),glm::vec3(1,0,0));
+        view=glm::rotate(view,glm::radians(45.0F),glm::vec3(0,1,0));
+        view=glm::scale(view,glm::vec3(0.625F));
+        view=glm::translate(view,glm::vec3(-0.5F,-0.4375F,-0.5F));
+
+        glm::mat4 root=glm::translate(glm::mat4(1),glm::vec3(0,1,1));
+        root=glm::scale(root,glm::vec3(1,-1,-1));
+        root=glm::translate(root,glm::vec3(0.5F));
+        root=view*root;
+        appendGuiModelBox(quads,64,64,0,19,0,0,0,14,10,14,
+                          glm::translate(root,glm::vec3(1,6,1)/16.0F));
+        appendGuiModelBox(quads,64,64,0,0,0,-5,-14,14,5,14,
+                          glm::translate(root,glm::vec3(1,7,15)/16.0F));
+        appendGuiModelBox(quads,64,64,0,0,-1,-2,-15,2,4,1,
+                          glm::translate(root,glm::vec3(8,7,15)/16.0F));
+        texture = *placed == BlockId::TrappedChest ? trappedChestItemTexture_ :
+                  (*placed == BlockId::EnderChest ? enderChestItemTexture_ : chestItemTexture_);
+    } else if (isShulker) {
+        const std::size_t color = static_cast<std::size_t>(static_cast<std::uint16_t>(*placed) -
+                                   static_cast<std::uint16_t>(BlockId::WhiteShulkerBox));
+        glm::mat4 view(1.0F);
+        view=glm::rotate(view,glm::radians(30.0F),glm::vec3(1,0,0));
+        view=glm::rotate(view,glm::radians(45.0F),glm::vec3(0,1,0));
+        view=glm::scale(view,glm::vec3(0.625F));
+        view=glm::translate(view,glm::vec3(-0.5F));
+
+        glm::mat4 root=glm::translate(glm::mat4(1),glm::vec3(0.5F,1.5F,0.5F));
+        root=glm::scale(root,glm::vec3(1,-1,-1));
+        root=glm::translate(root,glm::vec3(0,1,0));
+        root=glm::scale(root,glm::vec3(0.9995F));
+        root=glm::translate(root,glm::vec3(0,-1,0));
+        root=view*root;
+        appendGuiModelBox(quads,64,64,0,28,-8,-8,-8,16,8,16,
+                          glm::translate(root,glm::vec3(0,24,0)/16.0F));
+        appendGuiModelBox(quads,64,64,0,0,-8,-16,-8,16,12,16,
+                          glm::translate(root,glm::vec3(0,24,0)/16.0F));
+        texture=shulkerItemTextures_[std::min<std::size_t>(color,15)];
+    } else {
+        // TileEntityItemStackRenderer sends the bed through TileEntityBedRenderer.
+        // Reproduce its full two-piece item model and use the exact colour texture.
+        glm::mat4 view(1.0F);
+        view=glm::rotate(view,glm::radians(30.0F),glm::vec3(1,0,0));
+        view=glm::rotate(view,glm::radians(160.0F),glm::vec3(0,1,0));
+        view=glm::scale(view,glm::vec3(0.5325F));
+        view=glm::translate(view,glm::vec3(-0.5F,-0.28125F,0.5F));
+
+        const auto appendBedPiece=[&](bool head,float zOffset){
+            // i=0 in TileEntityBedRenderer's no-world item path resolves SOUTH.
+            glm::mat4 root=glm::translate(glm::mat4(1),glm::vec3(1.0F,0.5625F,zOffset+1.0F));
+            root=glm::rotate(root,glm::radians(90.0F),glm::vec3(1,0,0));
+            root=glm::rotate(root,glm::radians(180.0F),glm::vec3(0,0,1));
+            root=view*root;
+            appendGuiModelBox(quads,64,64,0,head?0:22,0,0,0,16,16,6,root);
+            struct Leg { int tv; float bx,by,bz,rz; bool onHead; };
+            constexpr std::array<Leg,4> legs={{{0,0,6,-16,0,false},{6,0,6,0,90,true},
+                                               {12,-16,6,-16,270,false},{18,-16,6,0,180,true}}};
+            for(const Leg& leg:legs){
+                if(leg.onHead!=head) continue;
+                glm::mat4 lm=glm::rotate(root,glm::radians(leg.rz),glm::vec3(0,0,1));
+                lm=glm::rotate(lm,glm::radians(90.0F),glm::vec3(1,0,0));
+                appendGuiModelBox(quads,64,64,50,leg.tv,leg.bx,leg.by,leg.bz,3,3,3,lm);
+            }
+        };
+        appendBedPiece(true,0.0F);
+        appendBedPiece(false,-1.0F);
+        texture=bedItemTextures_[std::min<std::size_t>(stack.damage&15U,15)];
+    }
+
+    drawGuiEntityQuads(texture,std::move(quads),x,y,scaleFactor,isBed?11.5F:15.0F);
+    return true;
+}
+
+bool GameHud::drawBlockModelStack(const ItemStack& stack, float x, float y, int scaleFactor) const {
+    if (stack.empty()) return false;
+    const ItemDefinition& item = items_.get(stack.itemId);
+    if (!item.placedBlock || blockRenderPath(*item.placedBlock) != BlockRenderPath::JsonModel) return false;
+    const BlockState state = makeBlockState(static_cast<std::uint16_t>(*item.placedBlock),
+                                            static_cast<std::uint8_t>(stack.damage & 15U));
+    std::vector<const BakedBlockModel*> models;
+    // Most zero-metadata ItemBlocks have a dedicated inventory model (for
+    // example fence_inventory) that differs from an isolated world state.
+    // Metadata variants are selected through the blockstate model so their
+    // exact subtype texture/state is retained.
+    if ((stack.damage & 15U) == 0U) {
+        const BlockModelManager& modelManager = resources_.models();
+        const BakedBlockModel* itemModel = modelManager.itemModel(item.name);
+        if (itemModel != nullptr && !itemModel->quads.empty()) models.push_back(itemModel);
+    }
+    if (models.empty()) {
+        const auto air = [](int, int, int) { return makeBlockState(0); };
+        const BlockModelState modelState = resolveBlockModelState(state, air);
+        models = resources_.models().select(modelState, 0);
+    }
+    if (models.empty()) return false;
+
+    struct DrawQuad { const BakedModelQuad* quad; std::array<glm::vec3,4> points; float depth; };
+    std::vector<DrawQuad> quads;
+    glm::mat4 rotation(1.0F);
+    rotation = glm::rotate(rotation, glm::radians(30.0F), glm::vec3(1,0,0));
+    rotation = glm::rotate(rotation, glm::radians(225.0F), glm::vec3(0,1,0));
+    for (const BakedBlockModel* model : models) {
+        if (!model) continue;
+        for (const BakedModelQuad& q : model->quads) {
+            DrawQuad d{&q,{},0.0F};
+            for (std::size_t i=0;i<4;++i) {
+                const glm::vec4 t=rotation*glm::vec4(q.positions[i]-glm::vec3(0.5F),1.0F);
+                d.points[i]=glm::vec3(t);
+                d.depth+=t.z;
+            }
+            d.depth*=0.25F;
+            quads.push_back(d);
+        }
+    }
+    if (quads.empty()) return false;
+    std::sort(quads.begin(),quads.end(),[](const DrawQuad& a,const DrawQuad& b){return a.depth<b.depth;});
+    ImDrawList* draw=ImGui::GetBackgroundDrawList();
+    const ImGuiIO& io=ImGui::GetIO();
+    const float sx=static_cast<float>(scaleFactor)/std::max(io.DisplayFramebufferScale.x,1.0e-6F);
+    const float sy=static_cast<float>(scaleFactor)/std::max(io.DisplayFramebufferScale.y,1.0e-6F);
+    constexpr std::array<float,6> shade={0.50F,1.0F,0.80F,0.80F,0.60F,0.60F};
+    for(const DrawQuad& d:quads){
+        std::array<ImVec2,4> p{};
+        for(std::size_t i=0;i<4;++i){
+            p[i]=ImVec2((x+8.0F+d.points[i].x*10.0F)*sx,(y+8.0F-d.points[i].y*10.0F)*sy);
+        }
+        const float sh=d.quad->shade?shade[static_cast<std::size_t>(d.quad->face)]:1.0F;
+        const int c=static_cast<int>(std::round(255.0F*sh));
+        draw->AddImageQuad(textureId(blockAtlas_.id()),p[0],p[1],p[2],p[3],
+            ImVec2(d.quad->uvs[0].x,d.quad->uvs[0].y),ImVec2(d.quad->uvs[1].x,d.quad->uvs[1].y),
+            ImVec2(d.quad->uvs[2].x,d.quad->uvs[2].y),ImVec2(d.quad->uvs[3].x,d.quad->uvs[3].y),
+            IM_COL32(c,c,c,255));
+    }
+    return true;
+}
+
 void GameHud::drawStack(const ItemStack& stack, float x, float y, int scaleFactor, bool count) const {
     if (stack.empty()) return;
     const ItemDefinition& item = items_.get(stack.itemId);
-    std::string icon = item.iconResource;
-    if (stack.itemId == 349) {
-        constexpr std::array<const char*, 4> fish = {"fish_cod_raw", "fish_salmon_raw", "fish_clownfish_raw", "fish_pufferfish_raw"};
-        icon = std::string("minecraft:items/") + fish[std::min<std::size_t>(stack.damage, 3)];
-    } else if (stack.itemId == 350) {
-        icon = std::string("minecraft:items/") + (stack.damage == 1 ? "fish_salmon_cooked" : "fish_cod_cooked");
-    } else if (stack.itemId == 351) {
-        constexpr std::array<const char*, 16> dyes = {"black","red","green","brown","blue","purple","cyan","silver",
-            "gray","pink","lime","yellow","light_blue","magenta","orange","white"};
-        icon = std::string("minecraft:items/dye_powder_") + dyes[std::min<std::size_t>(stack.damage, 15)];
+    bool rendered = drawBuiltinEntityStack(stack,x,y,scaleFactor);
+    if (!rendered) rendered = drawBlockModelStack(stack,x,y,scaleFactor);
+    if (!rendered) {
+        std::string icon = item.iconResource;
+        if (stack.itemId == 349) {
+            constexpr std::array<const char*, 4> fish = {"fish_cod_raw", "fish_salmon_raw", "fish_clownfish_raw", "fish_pufferfish_raw"};
+            icon = std::string("minecraft:items/") + fish[std::min<std::size_t>(stack.damage, 3)];
+        } else if (stack.itemId == 350) {
+            icon = std::string("minecraft:items/") + (stack.damage == 1 ? "fish_salmon_cooked" : "fish_cod_cooked");
+        } else if (stack.itemId == 351) {
+            constexpr std::array<const char*, 16> dyes = {"black","red","green","brown","blue","purple","cyan","silver","gray","pink","lime","yellow","light_blue","magenta","orange","white"};
+            icon = std::string("minecraft:items/dye_powder_") + dyes[std::min<std::size_t>(stack.damage, 15)];
+        }
+        const AtlasSprite* sprite = nullptr;
+        if (!icon.empty() && blockAtlas_.data().contains(icon)) sprite = &blockAtlas_.data().sprite(icon);
+        if (sprite == nullptr && item.placedBlock) {
+            const BlockState state = makeBlockState(static_cast<std::uint16_t>(*item.placedBlock), static_cast<std::uint8_t>(stack.damage & 15U));
+            sprite = &blockAtlas_.data().sprite(BlockRegistry::texture(state, Face::Up));
+        }
+        if (sprite != nullptr && sprite->name != "minecraft:missingno") {
+            ImDrawList* draw = ImGui::GetBackgroundDrawList();
+            const ImGuiIO& io = ImGui::GetIO();
+            const float scaleX = static_cast<float>(scaleFactor) / std::max(io.DisplayFramebufferScale.x, 1.0e-6F);
+            const float scaleY = static_cast<float>(scaleFactor) / std::max(io.DisplayFramebufferScale.y, 1.0e-6F);
+            draw->AddImage(textureId(blockAtlas_.id()), ImVec2(x * scaleX, y * scaleY), ImVec2((x + 16.0F) * scaleX, (y + 16.0F) * scaleY),
+                           ImVec2(sprite->bounds.u0, sprite->bounds.v0), ImVec2(sprite->bounds.u1, sprite->bounds.v1));
+        }
     }
-    const AtlasSprite* sprite = nullptr;
-    if (!icon.empty() && blockAtlas_.data().contains(icon))
-        sprite = &blockAtlas_.data().sprite(icon);
-    if (sprite == nullptr && item.placedBlock) {
-        const BlockState state = makeBlockState(static_cast<std::uint16_t>(*item.placedBlock),
-                                                static_cast<std::uint8_t>(stack.damage & 15U));
-        sprite = &blockAtlas_.data().sprite(BlockRegistry::texture(state, Face::Up));
-    }
-    if (sprite == nullptr || sprite->name == "minecraft:missingno") return;
-
-    ImDrawList* draw = ImGui::GetBackgroundDrawList();
-    const ImGuiIO& io = ImGui::GetIO();
-    const float scaleX = static_cast<float>(scaleFactor) / std::max(io.DisplayFramebufferScale.x, 1.0e-6F);
-    const float scaleY = static_cast<float>(scaleFactor) / std::max(io.DisplayFramebufferScale.y, 1.0e-6F);
-    draw->AddImage(textureId(blockAtlas_.id()), ImVec2(x * scaleX, y * scaleY),
-                   ImVec2((x + 16.0F) * scaleX, (y + 16.0F) * scaleY),
-                   ImVec2(sprite->bounds.u0, sprite->bounds.v0), ImVec2(sprite->bounds.u1, sprite->bounds.v1));
     if (count && stack.count > 1) {
         const std::string label = std::to_string(stack.count);
         drawText(x + 17.0F, y + 9.0F, label, scaleFactor, true, 0xFFFFFFFFU);
     }
 }
-
 void GameHud::drawTooltip(const ItemStack& stack, float mouseX, float mouseY,
                           int scaledWidth, int scaledHeight, int scaleFactor) const {
     if (stack.empty()) return;
@@ -286,8 +532,16 @@ void GameHud::drawTooltip(const ItemStack& stack, float mouseX, float mouseY,
     const ImGuiIO& io = ImGui::GetIO();
     const float sx = static_cast<float>(scaleFactor) / std::max(io.DisplayFramebufferScale.x, 1.0e-6F);
     const float sy = static_cast<float>(scaleFactor) / std::max(io.DisplayFramebufferScale.y, 1.0e-6F);
-    draw->AddRectFilled(ImVec2(x*sx,y*sy), ImVec2((x+width)*sx,(y+height)*sy), IM_COL32(16,0,16,240));
-    draw->AddRect(ImVec2((x-1)*sx,(y-1)*sy), ImVec2((x+width+1)*sx,(y+height+1)*sy), IM_COL32(80,0,128,255));
+    // Minecraft 1.12.2 GuiScreen tooltip geometry, but resolve the original
+    // alpha-blended purple edge to opaque pixels so the border cannot show the
+    // world through it. The outer purple is the requested #560E81 and the
+    // interior remains vanilla #100010.
+    const ImU32 purple = IM_COL32(86,14,129,255);
+    const ImU32 innerPurple = IM_COL32(43,7,65,255);
+    const ImU32 centre = IM_COL32(16,0,16,255);
+    draw->AddRectFilled(ImVec2((x-3)*sx,(y-4)*sy), ImVec2((x+width+3)*sx,(y+height+4)*sy), purple);
+    draw->AddRectFilled(ImVec2((x-2)*sx,(y-3)*sy), ImVec2((x+width+2)*sx,(y+height+3)*sy), innerPurple);
+    draw->AddRectFilled(ImVec2((x-1)*sx,(y-2)*sy), ImVec2((x+width+1)*sx,(y+height+2)*sy), centre);
     drawText(x + 4.0F, y + 4.0F, line, scaleFactor, false, 0xFFFFFFFFU);
 }
 
@@ -489,17 +743,34 @@ void GameHud::renderCreativeInventory(Player& player, int scaledWidth,
             if (leftClick) {
                 selectedCreativeTab_ = tab;
                 creativeScrollRow_ = 0;
+                searchFocused_ = (tab == CreativeTab::Search);
                 if (tab != CreativeTab::Search) searchText_.clear();
             }
         }
     }
 
     if (selectedCreativeTab_ == CreativeTab::Search) {
-        if (ImGui::IsKeyPressed(ImGuiKey_Backspace) && !searchText_.empty()) searchText_.pop_back();
-        for (ImWchar c : io.InputQueueCharacters)
-            if (c >= 32 && c < 127 && searchText_.size() < 50) searchText_.push_back(static_cast<char>(c));
+        const bool overSearch = mx >= left + 82.0F && mx < left + 171.0F &&
+                                my >= top + 5.0F && my < top + 17.0F;
+        if (leftClick && overSearch) {
+            searchFocused_ = true;
+            // Creative inventory already releases the GLFW cursor; explicitly
+            // keep it free when the search field acquires keyboard focus.
+            glfwSetInputMode(window_, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+        } else if (leftClick && !overSearch && !hasHoveredTab) {
+            searchFocused_ = false;
+        }
+        if (searchFocused_) {
+            if (ImGui::IsKeyPressed(ImGuiKey_Backspace) && !searchText_.empty()) searchText_.pop_back();
+            if (ImGui::IsKeyPressed(ImGuiKey_Delete)) searchText_.clear();
+            for (ImWchar c : io.InputQueueCharacters) {
+                if (c >= 32 && c < 127 && searchText_.size() < 50)
+                    searchText_.push_back(static_cast<char>(c));
+            }
+        }
         drawText(left + 84.0F, top + 7.0F, searchText_, scaleFactor, false, 0xFFFFFFFFU);
     } else if (selectedCreativeTab_ != CreativeTab::Inventory) {
+        searchFocused_ = false;
         drawText(left + 8.0F, top + 6.0F, ItemRegistry::tabName(selectedCreativeTab_), scaleFactor,
                  false, 0xFF404040U);
     }
@@ -623,6 +894,104 @@ void GameHud::renderInventory(Player& player, bool creative, int scaledWidth,
                               int scaledHeight, int scaleFactor) {
     if (creative) renderCreativeInventory(player, scaledWidth, scaledHeight, scaleFactor);
     else renderSurvivalInventory(player, scaledWidth, scaledHeight, scaleFactor);
+}
+
+void GameHud::openBlockEntityScreen(const BlockEntityAction& action) {
+    if (activeBlockEntityAction_) blockEntities_.endViewing(*activeBlockEntityAction_);
+    activeBlockEntityAction_ = action;
+    signEditLine_ = 0;
+    blockEntities_.beginViewing(action);
+}
+
+void GameHud::closeBlockEntityScreen() {
+    if (activeBlockEntityAction_) blockEntities_.endViewing(*activeBlockEntityAction_);
+    activeBlockEntityAction_.reset();
+    signEditLine_ = 0;
+}
+
+void GameHud::renderContainerScreen(const World& world, Player& player,
+                                    int scaledWidth, int scaledHeight, int scaleFactor) {
+    if (!activeBlockEntityAction_) return;
+    const glm::ivec3 pos = activeBlockEntityAction_->position;
+    const int slotCount = blockEntities_.containerSlotCount(world,pos);
+    if (slotCount <= 0) return;
+    const int rows = slotCount / 9;
+    const int ySize = 114 + rows * 18;
+    const float left = static_cast<float>((scaledWidth - 176) / 2);
+    const float top = static_cast<float>((scaledHeight - ySize) / 2);
+    ImDrawList* draw=ImGui::GetBackgroundDrawList();
+    ImGuiIO& io=ImGui::GetIO();
+    const float sx=static_cast<float>(scaleFactor)/std::max(io.DisplayFramebufferScale.x,1.0e-6F);
+    const float sy=static_cast<float>(scaleFactor)/std::max(io.DisplayFramebufferScale.y,1.0e-6F);
+    const float upperHeight=static_cast<float>(rows*18+17);
+    draw->AddImage(textureId(generic54Texture_),ImVec2(left*sx,top*sy),ImVec2((left+176)*sx,(top+upperHeight)*sy),
+        ImVec2(0,0),ImVec2(176.0F/256.0F,upperHeight/256.0F));
+    draw->AddImage(textureId(generic54Texture_),ImVec2(left*sx,(top+upperHeight)*sy),ImVec2((left+176)*sx,(top+upperHeight+96)*sy),
+        ImVec2(0,126.0F/256.0F),ImVec2(176.0F/256.0F,222.0F/256.0F));
+    drawText(left+8,top+6,blockEntities_.containerTitle(world,pos),scaleFactor,false,0xFF404040U);
+    drawText(left+8,top+static_cast<float>(ySize-94),"Inventory",scaleFactor,false,0xFF404040U);
+    const float mx=io.MousePos.x/sx,my=io.MousePos.y/sy;
+    const bool lc=ImGui::IsMouseClicked(ImGuiMouseButton_Left), rc=ImGui::IsMouseClicked(ImGuiMouseButton_Right);
+    ItemStack hovered{};
+    for(int i=0;i<slotCount;++i){
+        const int row=i/9,col=i%9; const float x=left+8+col*18.0F,y=top+18+row*18.0F;
+        ItemStack& slot=blockEntities_.containerSlot(world,pos,i); drawStack(slot,x+1,y+1,scaleFactor);
+        if(mx>=x&&mx<x+18&&my>=y&&my<y+18){hovered=slot;if(lc||rc)interactInventorySlot(slot,rc,false);}
+    }
+    const float invTop=top+static_cast<float>(rows*18+31);
+    for(int row=0;row<3;++row)for(int col=0;col<9;++col){
+        const std::size_t idx=static_cast<std::size_t>(9+row*9+col); const float x=left+8+col*18.0F,y=invTop+row*18.0F;
+        ItemStack& slot=player.inventory().slot(idx); drawStack(slot,x+1,y+1,scaleFactor);
+        if(mx>=x&&mx<x+18&&my>=y&&my<y+18){hovered=slot;if(lc||rc)interactInventorySlot(slot,rc,false);}
+    }
+    const float hotbarY=invTop+58.0F;
+    for(int col=0;col<9;++col){
+        const float x=left+8+col*18.0F; ItemStack& slot=player.inventory().slot(static_cast<std::size_t>(col));
+        drawStack(slot,x+1,hotbarY+1,scaleFactor);
+        if(mx>=x&&mx<x+18&&my>=hotbarY&&my<hotbarY+18){hovered=slot;if(lc||rc)interactInventorySlot(slot,rc,false);}
+    }
+    if(!hovered.empty())drawTooltip(hovered,mx,my,scaledWidth,scaledHeight,scaleFactor);
+    if(!cursorStack_.empty())drawStack(cursorStack_,mx-8,my-8,scaleFactor);
+}
+
+void GameHud::renderSignEditor(int scaledWidth, int scaledHeight, int scaleFactor) {
+    if (!activeBlockEntityAction_) return;
+    auto* lines=blockEntities_.signLines(activeBlockEntityAction_->position);
+    if(lines==nullptr)return;
+    ImGuiIO& io=ImGui::GetIO();
+    if(ImGui::IsKeyPressed(ImGuiKey_UpArrow))signEditLine_=(signEditLine_+3)%4;
+    if(ImGui::IsKeyPressed(ImGuiKey_DownArrow)||ImGui::IsKeyPressed(ImGuiKey_Enter))signEditLine_=(signEditLine_+1)%4;
+    if(ImGui::IsKeyPressed(ImGuiKey_Backspace)&&!(*lines)[static_cast<std::size_t>(signEditLine_)].empty())
+        (*lines)[static_cast<std::size_t>(signEditLine_)].pop_back();
+    for(ImWchar c:io.InputQueueCharacters){
+        if(c<32||c>=127)continue; std::string& line=(*lines)[static_cast<std::size_t>(signEditLine_)];
+        const char ch=static_cast<char>(c); const float prospective=textWidth(line)+static_cast<float>(charWidths_[static_cast<unsigned char>(ch)]);
+        if(prospective<=90.0F)line.push_back(ch);
+    }
+    const float cx=static_cast<float>(scaledWidth)*0.5F, cy=static_cast<float>(scaledHeight)*0.5F;
+    drawText(cx-textWidth("Edit sign message")*0.5F,cy-56,"Edit sign message",scaleFactor,false,0xFFFFFFFFU);
+    for(int i=0;i<4;++i){
+        std::string display=(*lines)[static_cast<std::size_t>(i)];
+        if(i==signEditLine_)display="> "+display+" <";
+        drawText(cx-textWidth(display)*0.5F,cy-24+i*10.0F,display,scaleFactor,false,0xFFFFFFFFU);
+    }
+    // Vanilla-sized Done button using widgets.png (normal button row).
+    const float bx=cx-50.0F,by=cy+34.0F;
+    ImDrawList* draw=ImGui::GetBackgroundDrawList();
+    const float sx=static_cast<float>(scaleFactor)/std::max(io.DisplayFramebufferScale.x,1.0e-6F),sy=static_cast<float>(scaleFactor)/std::max(io.DisplayFramebufferScale.y,1.0e-6F);
+    draw->AddImage(textureId(widgetsTexture_),ImVec2(bx*sx,by*sy),ImVec2((bx+100)*sx,(by+20)*sy),ImVec2(0,66.0F/256.0F),ImVec2(100.0F/256.0F,86.0F/256.0F));
+    drawText(cx-textWidth("Done")*0.5F,by+6,"Done",scaleFactor,false,0xFFFFFFFFU);
+    const float mx=io.MousePos.x/sx,my=io.MousePos.y/sy;
+    if(ImGui::IsMouseClicked(ImGuiMouseButton_Left)&&mx>=bx&&mx<bx+100&&my>=by&&my<by+20){ closeBlockEntityScreen(); screenCloseRequested_=true; }
+}
+
+void GameHud::renderBlockEntityScreen(const World& world, Player& player,
+                                      int scaledWidth, int scaledHeight, int scaleFactor) {
+    if(!activeBlockEntityAction_)return;
+    if(activeBlockEntityAction_->type==BlockEntityActionType::EditSign)
+        renderSignEditor(scaledWidth,scaledHeight,scaleFactor);
+    else if(activeBlockEntityAction_->type==BlockEntityActionType::OpenChest || activeBlockEntityAction_->type==BlockEntityActionType::OpenShulker)
+        renderContainerScreen(world,player,scaledWidth,scaledHeight,scaleFactor);
 }
 
 void GameHud::renderDebug(const World& world, const Player& player, const Camera& camera,
@@ -756,9 +1125,13 @@ void GameHud::render(const World& world, Player& player, const Camera& camera,
         renderDebug(world, player, camera, config, streamer, lighting, renderer, hit,
                     scaled.scaledWidth, scaled.scaledHeight, scaled.scaleFactor,
                     framebufferWidth, framebufferHeight, framesPerSecond);
-    if (inventoryOpen)
-        renderInventory(player, player.gameMode() == GameMode::Creative,
-                        scaled.scaledWidth, scaled.scaledHeight, scaled.scaleFactor);
+    if (inventoryOpen) {
+        if (activeBlockEntityAction_)
+            renderBlockEntityScreen(world, player, scaled.scaledWidth, scaled.scaledHeight, scaled.scaleFactor);
+        else
+            renderInventory(player, player.gameMode() == GameMode::Creative,
+                            scaled.scaledWidth, scaled.scaledHeight, scaled.scaleFactor);
+    }
     if (paused && !inventoryOpen) {
         const std::string label = "Paused";
         drawText(static_cast<float>(scaled.scaledWidth) * 0.5F - textWidth(label) * 0.5F,

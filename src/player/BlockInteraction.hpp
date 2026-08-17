@@ -7,6 +7,7 @@
 
 #include "blocks/PlacementRules.hpp"
 #include "world/Raycast.hpp"
+#include "world/BlockEntitySystem.hpp"
 
 class ItemRegistry;
 class Player;
@@ -16,13 +17,19 @@ class WorldRenderer;
 
 class BlockInteraction {
 public:
-    explicit BlockInteraction(const ItemRegistry& items) : placement_(items) {}
+    BlockInteraction(const ItemRegistry& items, BlockEntitySystem& blockEntities)
+        : placement_(items), blockEntities_(blockEntities) {}
 
     void tick(World& world, LightingEngine& lighting, WorldRenderer& renderer,
               Player& player, const glm::vec3& lookDirection,
               bool attacking, bool usingBlock);
 
     [[nodiscard]] float breakProgress() const { return breakProgress_; }
+    [[nodiscard]] std::optional<BlockEntityAction> takeBlockEntityAction() {
+        auto result = pendingBlockEntityAction_;
+        pendingBlockEntityAction_.reset();
+        return result;
+    }
 
 private:
     void commitEdit(World& world, LightingEngine& lighting, WorldRenderer& renderer,
@@ -33,6 +40,8 @@ private:
                      WorldRenderer& renderer, const glm::ivec3& position);
 
     PlacementRules placement_;
+    BlockEntitySystem& blockEntities_;
+    std::optional<BlockEntityAction> pendingBlockEntityAction_;
     std::optional<glm::ivec3> breakingBlock_;
     float breakProgress_ = 0.0F;
     int attackDelay_ = 0;

@@ -125,6 +125,24 @@ private:
             case BlockId::SnowLayer: case BlockId::Cocoa: case BlockId::Carpet:
             case BlockId::StandingSign: case BlockId::WallSign:
             case BlockId::StandingBanner: case BlockId::WallBanner:
+            case BlockId::StoneSlab: case BlockId::WoodenSlab: case BlockId::StoneSlab2:
+            case BlockId::PurpurSlab: case BlockId::OakStairs: case BlockId::StoneStairs:
+            case BlockId::BrickStairs: case BlockId::StoneBrickStairs: case BlockId::NetherBrickStairs:
+            case BlockId::SandstoneStairs: case BlockId::SpruceStairs: case BlockId::BirchStairs:
+            case BlockId::JungleStairs: case BlockId::QuartzStairs: case BlockId::AcaciaStairs:
+            case BlockId::DarkOakStairs: case BlockId::RedSandstoneStairs: case BlockId::PurpurStairs:
+            case BlockId::Fence: case BlockId::SpruceFence: case BlockId::BirchFence:
+            case BlockId::JungleFence: case BlockId::DarkOakFence: case BlockId::AcaciaFence:
+            case BlockId::NetherBrickFence: case BlockId::CobblestoneWall:
+            case BlockId::IronBars: case BlockId::GlassPane: case BlockId::StainedGlassPane:
+            case BlockId::FenceGate: case BlockId::SpruceFenceGate: case BlockId::BirchFenceGate:
+            case BlockId::JungleFenceGate: case BlockId::DarkOakFenceGate: case BlockId::AcaciaFenceGate:
+            case BlockId::Farmland: case BlockId::GrassPath: case BlockId::Cactus:
+            case BlockId::Anvil: case BlockId::Hopper:
+            case BlockId::EnchantingTable: case BlockId::BrewingStand: case BlockId::Cauldron:
+            case BlockId::EndPortalFrame: case BlockId::DragonEgg: case BlockId::Cake:
+            case BlockId::DaylightDetector: case BlockId::DaylightDetectorInverted:
+            case BlockId::FlowerPot: case BlockId::Skull:
                 return true;
             default:
                 return false;
@@ -141,13 +159,12 @@ private:
             auto found = adjustedModels_.find(original);
             if (found == adjustedModels_.end()) {
                 auto copy = std::make_unique<BakedBlockModel>(*original);
-                // Vanilla attachment/floor models do not behave as opaque cubes.
-                // Disabling AO here prevents the generic registry fallback from
-                // producing the black side bands visible on pressure plates and
-                // similar custom geometry. Removing cullFace makes occlusion be
-                // determined by the actual baked quad instead of a fake cube.
+                // The historical registry still marks several thin blocks as
+                // full cubes. Do not let that force full-cube AO onto their baked
+                // geometry. Preserve Mojang's cullFace declarations, however:
+                // stripping them creates internal/overdraw faces and is the wrong
+                // fix for neighbour occlusion.
                 copy->ambientOcclusion = false;
-                for (BakedModelQuad& quad : copy->quads) quad.cullFace.reset();
                 found = adjustedModels_.emplace(original, std::move(copy)).first;
             }
             result.push_back(found->second.get());
