@@ -36,13 +36,15 @@ void NibbleArray::set(int x, int y, int z, std::uint8_t value) {
 }
 
 BlockState Chunk::get(int localX, int y, int localZ) const {
-    if (localX < 0 || localX >= chunkSize || localZ < 0 || localZ >= chunkSize || y < 0 || y >= chunkHeight) return makeBlockState(0);
+    if (localX < 0 || localX >= chunkSize || localZ < 0 || localZ >= chunkSize || y < 0 || y >= chunkHeight)
+        return makeBlockState(0);
     const auto& storage = sections_[static_cast<std::size_t>(y >> 4)];
     return storage ? storage->get(localX, y & 15, localZ) : makeBlockState(0);
 }
 
 bool Chunk::set(int localX, int y, int localZ, BlockState state) {
-    if (localX < 0 || localX >= chunkSize || localZ < 0 || localZ >= chunkSize || y < 0 || y >= chunkHeight) return false;
+    if (localX < 0 || localX >= chunkSize || localZ < 0 || localZ >= chunkSize || y < 0 || y >= chunkHeight)
+        return false;
     auto& storage = sections_[static_cast<std::size_t>(y >> 4)];
     if (!storage && blockId(state) == 0) return false;
     if (!storage) storage = std::make_unique<ChunkSection>();
@@ -60,8 +62,6 @@ std::uint8_t Chunk::skyLight(int localX, int y, int localZ) const {
     if (localX < 0 || localX >= chunkSize || localZ < 0 || localZ >= chunkSize || y < 0 || y >= chunkHeight)
         return y >= chunkHeight ? 15 : 0;
     const auto& section = lightSections_[static_cast<std::size_t>(y >> 4)];
-    // Unlit chunks are never rendered. Returning the vanilla unloaded-world
-    // skylight default keeps boundary snapshots deterministic while they wait.
     if (!section) return lightingReady_ ? 0 : 15;
     return section->sky.get(localX, y & 15, localZ);
 }

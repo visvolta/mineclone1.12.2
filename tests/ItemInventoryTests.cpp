@@ -50,7 +50,7 @@ int main() {
     const ItemStack brickSlab{static_cast<std::uint16_t>(BlockId::StoneSlab), 64, 4, {}};
     const ItemStack quartzSlab{static_cast<std::uint16_t>(BlockId::StoneSlab), 64, 7, {}};
     assert(items.stackDisplayName(cobbleSlab) == "Cobblestone Slab");
-    assert(items.stackDisplayName(brickSlab) == "Brick Slab");
+    assert(items.stackDisplayName(brickSlab) == "Bricks Slab");
     assert(items.stackDisplayName(quartzSlab) == "Quartz Slab");
     assert(items.stackDisplayName(ItemStack{355,1,14,{}}) == "Red Bed");
     assert(items.stackDisplayName(ItemStack{397,1,5,{}}) == "Dragon Head");

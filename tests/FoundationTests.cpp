@@ -125,6 +125,19 @@ void testPlayerUsesBlockCollisionShapes() {
     assert(!throughTorch.intersectsBlock(world, {1, 0, 0}));
 }
 
+
+void testVanillaNonOpaqueFallbackTraits() {
+    const std::array<TextureId, 6> textures{};
+    const BlockDefinition enchanting{"enchanting_table", RenderLayer::Solid, true, true, 5.0F, true, textures};
+    const BlockDefinition beacon{"beacon", RenderLayer::Solid, true, true, 3.0F, false, textures};
+    const BlockDefinition shulker{"white_shulker_box", RenderLayer::Solid, true, true, 2.0F, true, textures};
+    const BlockDefinition stone{"stone", RenderLayer::Solid, true, true, 1.5F, true, textures};
+    assert(!enchanting.opaque && enchanting.lightOpacity == 0);
+    assert(!beacon.opaque && beacon.lightOpacity == 0);
+    assert(!shulker.opaque && shulker.lightOpacity == 0);
+    assert(stone.opaque && stone.lightOpacity == 255);
+}
+
 void testIntentionalRenderPathTable() {
     std::array<int, 5> counts{};
     int registered = 0;
@@ -152,6 +165,7 @@ int main() {
     testDoorTrapdoorAndCactusShapes();
     testShapeAwareRaycast();
     testPlayerUsesBlockCollisionShapes();
+    testVanillaNonOpaqueFallbackTraits();
     testIntentionalRenderPathTable();
     std::cout << "All asset-free Blockcraft foundation tests passed.\n";
     return 0;

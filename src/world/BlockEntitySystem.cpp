@@ -6,6 +6,7 @@
 #include "blocks/BlockRegistry.hpp"
 #include "world/Chunk.hpp"
 #include "world/Raycast.hpp"
+#include "save/Nbt.hpp"
 #include "world/World.hpp"
 
 namespace {
@@ -92,6 +93,59 @@ void BlockEntitySystem::scanChunk(const World& world, int chunkX, int chunkZ) {
             }
         }
     }
+
+    // Anvil-loaded TileEntities are retained by Chunk as uncompressed NBT.
+    // Restore the Stage 7 runtime state after the block scan created the
+    // matching runtime object. Generated structure tile entities remain
+    // available even when they are not one of the currently interactive types.
+    for (const GeneratedBlockEntity& generated : chunk->blockEntities()) {
+        try {
+            const nbt::Document document = nbt::decode(generated.nbt);
+            const nbt::Compound& c = document.root.compound();
+            const glm::ivec3 position{
+                static_cast<int>(nbt::integer(c, "x", generated.x)),
+                static_cast<int>(nbt::integer(c, "y", generated.y)),
+                static_cast<int>(nbt::integer(c, "z", generated.z))};
+            RuntimeBlockEntity* entity = find(position);
+            if (entity == nullptr) continue;
+            if (entity->type == RuntimeBlockEntityType::Sign) {
+                for (int line = 0; line < 4; ++line) {
+                    std::string text = nbt::string(c, "Text" + std::to_string(line + 1), "");
+                    const std::string marker = "\"text\":\"";
+                    const std::size_t begin = text.find(marker);
+                    if (begin != std::string::npos) {
+                        const std::size_t first = begin + marker.size();
+                        const std::size_t end = text.find('\"', first);
+                        if (end != std::string::npos) text = text.substr(first, end - first);
+                    }
+                    entity->signText[static_cast<std::size_t>(line)] = text;
+                }
+            }
+            if (entity->type == RuntimeBlockEntityType::Bed)
+                entity->color = static_cast<std::uint8_t>(nbt::integer(c, "color", entity->color) & 15);
+            if (entity->type == RuntimeBlockEntityType::ShulkerBox)
+                entity->color = static_cast<std::uint8_t>(nbt::integer(c, "Color", entity->color) & 15);
+            if (const nbt::Tag* items = nbt::find(c, "Items"); items && items->type == nbt::Type::List) {
+                for (const nbt::Tag& item : items->list()) {
+                    if (item.type != nbt::Type::Compound) continue;
+                    const nbt::Compound& itemData = item.compound();
+                    const int slot = static_cast<int>(nbt::integer(itemData, "Slot", -1));
+                    if (slot < 0 || slot >= 27) continue;
+                    ItemStack stack;
+                    stack.itemId = static_cast<std::uint16_t>(nbt::integer(itemData, "BlockcraftItemId", 0));
+                    stack.count = static_cast<int>(nbt::integer(itemData, "Count", 0));
+                    stack.damage = static_cast<std::uint16_t>(nbt::integer(itemData, "Damage", 0));
+                    if (const nbt::Tag* raw = nbt::find(itemData, "BlockcraftRawNbt"); raw && raw->type == nbt::Type::ByteArray)
+                        for (std::int8_t value : std::get<nbt::ByteArray>(raw->value)) stack.nbt.push_back(static_cast<std::uint8_t>(value));
+                    entity->inventory[static_cast<std::size_t>(slot)] = std::move(stack);
+                }
+            }
+        } catch (...) {
+            // Structure-template payloads from earlier stages may not have a
+            // named NBT root. They remain preserved by Chunk and are ignored
+            // here until their block-entity class is implemented.
+        }
+    }
 }
 
 void BlockEntitySystem::scanLoadedWorld(const World& world) {
@@ -120,6 +174,10 @@ void BlockEntitySystem::placedFromItem(const glm::ivec3& position, BlockState st
     if (entity == nullptr) return;
     if (entity->type == RuntimeBlockEntityType::Bed)
         entity->color = static_cast<std::uint8_t>(stack.damage & 15U);
+}
+
+void BlockEntitySystem::restore(RuntimeBlockEntity entity) {
+    entities_.insert_or_assign(key(entity.position), std::move(entity));
 }
 
 RuntimeBlockEntity* BlockEntitySystem::find(const glm::ivec3& position) {

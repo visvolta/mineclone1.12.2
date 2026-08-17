@@ -31,6 +31,10 @@ public:
 
     void tick(const World& world, const PlayerInput& input, const glm::vec3& lookDirection);
     void toggleGameMode();
+    void restoreState(glm::dvec3 feetPosition, glm::dvec3 velocity, GameMode mode, std::size_t selectedHotbar) {
+        position_ = feetPosition; previousPosition_ = feetPosition; velocity_ = velocity; gameMode_ = mode;
+        flying_ = false; onGround_ = false; inventory_.selectHotbar(selectedHotbar);
+    }
 
     [[nodiscard]] GameMode gameMode() const { return gameMode_; }
     [[nodiscard]] bool flying() const { return flying_; }

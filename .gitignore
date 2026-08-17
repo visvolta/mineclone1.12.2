@@ -46,6 +46,9 @@ compile_commands.json
 # Extracted runtime assets (normally inside build/)
 /minecraft-assets/
 
+# Stage 8 local single-player worlds.
+/saves/
+
 # Local game client artifact used for generation but not committed to source control
 # (the project expects a legitimate 1.12.2 Java client JAR to exist locally)
 1.12.2.jar

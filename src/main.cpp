@@ -3,6 +3,8 @@
 #include <chrono>
 #include <cstdlib>
 #include <exception>
+#include <filesystem>
+#include <optional>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
@@ -17,6 +19,7 @@
 
 #include "rendering/Camera.hpp"
 #include "client/ScaledResolution.hpp"
+#include "client/FrontEnd.hpp"
 #include "items/ItemRegistry.hpp"
 #include "environment/Environment.hpp"
 #include "lighting/LightingEngine.hpp"
@@ -31,6 +34,7 @@
 #include "rendering/TextureAtlas.hpp"
 #include "rendering/WorldRenderer.hpp"
 #include "world/Raycast.hpp"
+#include "save/WorldSave.hpp"
 #include "world/World.hpp"
 #include "world/BlockEntitySystem.hpp"
 #include "worldgen/ChunkStreamer.hpp"
@@ -174,9 +178,31 @@ int main() {
     glCullFace(GL_BACK);
 
     try {
-        const WorldConfig config = WorldConfig::load(BLOCKCRAFT_CONFIG_PATH);
+        const WorldConfig clientDefaults = WorldConfig::load(BLOCKCRAFT_CONFIG_PATH);
+        glfwSwapInterval(clientDefaults.vsync ? 1 : 0);
+
+        // Stage 8 starts in the 1.12.2-style title screen rather than creating
+        // an implicit technical world. The frontend owns its temporary ImGui
+        // context and releases it before GameHud constructs the in-game one.
+        setCursorCaptured(window, false);
+        std::optional<std::filesystem::path> selectedWorld;
+        {
+            FrontEnd frontEnd(window, BLOCKCRAFT_ASSET_ROOT, BLOCKCRAFT_SAVES_ROOT, clientDefaults);
+            selectedWorld = frontEnd.run();
+        }
+        if (!selectedWorld || glfwWindowShouldClose(window) == GLFW_TRUE) {
+            glfwDestroyWindow(window);
+            glfwTerminate();
+            return EXIT_SUCCESS;
+        }
+
+        ItemRegistry itemRegistry(BLOCKCRAFT_ASSET_ROOT);
+        WorldSave worldSave(*selectedWorld, itemRegistry);
+        const WorldConfig config = worldSave.loadConfig(clientDefaults);
         glfwSwapInterval(config.vsync ? 1 : 0);
-        std::cout << "World seed: " << config.seed << " (" << config.seedText << ")\n"
+
+        std::cout << "World folder: " << selectedWorld->string() << "\n"
+                  << "World seed: " << config.seed << " (" << config.seedText << ")\n"
                   << "World type: " << worldTypeName(config.worldType) << "\n"
                   << "View distance: " << config.viewDistance << " chunks\n"
                   << "GUI scale: " << config.guiScale << " (0 = 1.12.2 Auto)\n"
@@ -190,10 +216,22 @@ int main() {
 #ifndef NDEBUG
         std::cout << "Runtime assertions: enabled\n";
 #endif
+
         World world;
+        BlockEntitySystem blockEntities;
+        Player player({0.5, 80.0, 0.5});
+        LoadedPlayerState loadedPlayer = worldSave.loadPlayer(player);
+
         BiomeColors::load(BLOCKCRAFT_ASSET_ROOT);
-        ChunkStreamer chunkStreamer(world, config, config.viewDistance);
-        chunkStreamer.prime(0.0, 0.0, 1);
+        ChunkStreamer chunkStreamer(world, config, config.viewDistance, &worldSave, &blockEntities);
+        chunkStreamer.prime(loadedPlayer.position.x, loadedPlayer.position.z, 1);
+        if (!loadedPlayer.hasPlayer) {
+            loadedPlayer.position.y = spawnHeight(
+                world, static_cast<int>(std::floor(loadedPlayer.position.x)),
+                static_cast<int>(std::floor(loadedPlayer.position.z)));
+            player.restoreState(loadedPlayer.position, glm::dvec3{0.0}, loadedPlayer.gameMode, loadedPlayer.selectedHotbar);
+        }
+
         LightingEngine lightingEngine(world, chunkStreamer.workers());
         for (const auto& [chunkKey, chunk] : world.chunks()) {
             static_cast<void>(chunkKey);
@@ -201,18 +239,17 @@ int main() {
         }
         BlockRenderResources blockRenderResources(BLOCKCRAFT_ASSET_ROOT);
         TextureAtlas atlas(blockRenderResources.atlas());
-        ItemRegistry itemRegistry(BLOCKCRAFT_ASSET_ROOT);
-        BlockEntitySystem blockEntities;
         blockEntities.scanLoadedWorld(world);
         WorldRenderer worldRenderer(world, atlas, blockRenderResources, chunkStreamer.workers());
         Environment environment(config);
+        worldSave.loadEnvironment(environment);
         EnvironmentRenderer environmentRenderer(environment);
         DebugRenderer debugRenderer(blockRenderResources);
         GameHud gameHud(window, BLOCKCRAFT_ASSET_ROOT, atlas, itemRegistry, blockRenderResources, blockEntities);
         BlockEntityRenderer blockEntityRenderer(BLOCKCRAFT_ASSET_ROOT, blockEntities);
-        Player player({0.5, spawnHeight(world, 0, 0), 0.5});
         BlockInteraction interaction(itemRegistry, blockEntities);
         camera.setPosition(player.eyePosition());
+        setCursorCaptured(window, true);
         updateWindowTitle(window, player, itemRegistry, config, 0.0, world.chunkCount(),
                           chunkStreamer, lightingEngine, worldRenderer);
 
@@ -238,6 +275,8 @@ int main() {
                 std::chrono::duration<double>(1.0 / static_cast<double>(config.targetFps)))
             : FrameClock::duration::zero();
         auto nextFrameDeadline = FrameClock::now();
+        double lastAutosave = previousTime;
+        constexpr double autosaveIntervalSeconds = 30.0;
 
         while (glfwWindowShouldClose(window) == GLFW_FALSE) {
             glfwPollEvents();
@@ -433,6 +472,11 @@ int main() {
                 }
             }
 
+            if (currentTime - lastAutosave >= autosaveIntervalSeconds) {
+                worldSave.saveAll(world, blockEntities, config, player, environment);
+                lastAutosave = currentTime;
+            }
+
             ++titleFrameCount;
             const double titleElapsed = currentTime - titleIntervalStart;
             if (titleElapsed >= 0.5) {
@@ -443,6 +487,11 @@ int main() {
                 titleFrameCount = 0;
             }
         }
+
+        // Flush the streamer's LRU before saving the live chunks so both active
+        // and recently visited terrain survive a clean process restart.
+        chunkStreamer.flushCache();
+        worldSave.saveAll(world, blockEntities, config, player, environment);
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         glfwDestroyWindow(window);

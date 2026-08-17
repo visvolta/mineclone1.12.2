@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(Blockcraft VERSION 0.12.1 LANGUAGES C CXX)
+project(Blockcraft VERSION 0.13.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -226,6 +226,9 @@ set(BLOCKCRAFT_CORE_SOURCES
     src/world/Chunk.cpp
     src/world/World.cpp
     src/world/BlockEntitySystem.cpp
+    src/save/Nbt.cpp
+    src/save/RegionFile.cpp
+    src/save/WorldSave.cpp
     src/rendering/ChunkMesher.cpp
     src/rendering/TextureAtlasData.cpp
     src/rendering/ModelLoader.cpp
@@ -245,6 +248,7 @@ set(BLOCKCRAFT_CORE_SOURCES
 
 add_executable(blockcraft
     src/main.cpp
+    src/client/FrontEnd.cpp
     src/rendering/Camera.cpp
     src/player/BlockInteraction.cpp
     src/rendering/Shader.cpp
@@ -262,6 +266,7 @@ target_include_directories(blockcraft PRIVATE src ${stb_SOURCE_DIR})
 target_compile_definitions(blockcraft PRIVATE
     BLOCKCRAFT_ASSET_ROOT="${BLOCKCRAFT_ASSET_ROOT}"
     BLOCKCRAFT_CONFIG_PATH="${CMAKE_CURRENT_SOURCE_DIR}/world.cfg"
+    BLOCKCRAFT_SAVES_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/saves"
     $<$<AND:$<CONFIG:Debug>,$<CXX_COMPILER_ID:MSVC>>:BLOCKCRAFT_OPTIMIZED_DEBUG=1>
 )
 configure_file(world.cfg world.cfg COPYONLY)
@@ -353,15 +358,31 @@ if(BUILD_TESTING)
         src/world/Chunk.cpp
         src/world/World.cpp
         src/world/BlockEntitySystem.cpp
+        src/save/Nbt.cpp
     )
     target_include_directories(blockcraft_block_entity_tests PRIVATE src)
-    target_link_libraries(blockcraft_block_entity_tests PRIVATE glm::glm)
+    target_link_libraries(blockcraft_block_entity_tests PRIVATE glm::glm zlibstatic)
     if(MSVC)
         target_compile_options(blockcraft_block_entity_tests PRIVATE /W4 /permissive- /UNDEBUG)
     else()
         target_compile_options(blockcraft_block_entity_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
     endif()
     add_test(NAME blockcraft_block_entities COMMAND blockcraft_block_entity_tests)
+
+    add_executable(blockcraft_save_format_tests
+        tests/SaveFormatTests.cpp
+        src/save/Nbt.cpp
+        src/save/RegionFile.cpp
+        src/world/Chunk.cpp
+    )
+    target_include_directories(blockcraft_save_format_tests PRIVATE src)
+    target_link_libraries(blockcraft_save_format_tests PRIVATE zlibstatic)
+    if(MSVC)
+        target_compile_options(blockcraft_save_format_tests PRIVATE /W4 /permissive- /UNDEBUG)
+    else()
+        target_compile_options(blockcraft_save_format_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
+    endif()
+    add_test(NAME blockcraft_save_formats COMMAND blockcraft_save_format_tests)
 endif()
 
 set_property(DIRECTORY PROPERTY VS_STARTUP_PROJECT blockcraft)

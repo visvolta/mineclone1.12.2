@@ -12,6 +12,16 @@ class World;
 enum class PrecipitationType { None, Rain, Snow };
 enum class FogMode { Linear, Exponential };
 
+struct EnvironmentSaveState {
+    double worldTime = 0.0;
+    bool raining = false;
+    bool thundering = false;
+    int rainTime = 0;
+    int thunderTime = 0;
+    float rainStrength = 0.0F;
+    float thunderStrength = 0.0F;
+};
+
 struct EnvironmentFrame {
     double worldTime = 0.0;
     float celestialAngle = 0.0F;
@@ -50,6 +60,15 @@ public:
     // Single-player bed completion uses the same 24000-tick world clock as
     // Minecraft 1.12.2. Persistence of this value belongs to the save stage.
     void setWorldTime(double value) { worldTime_ = value; }
+    [[nodiscard]] EnvironmentSaveState saveState() const {
+        return {worldTime_, raining_, thundering_, rainTime_, thunderTime_, rainStrength_, thunderStrength_};
+    }
+    void restoreSaveState(const EnvironmentSaveState& state) {
+        worldTime_ = state.worldTime; raining_ = state.raining; thundering_ = state.thundering;
+        rainTime_ = state.rainTime; thunderTime_ = state.thunderTime;
+        previousRainStrength_ = rainStrength_ = state.rainStrength;
+        previousThunderStrength_ = thunderStrength_ = state.thunderStrength;
+    }
 
     [[nodiscard]] static float celestialAngle(double worldTime);
     [[nodiscard]] static float starBrightness(float angle);

@@ -59,6 +59,7 @@ public:
                       BlockState oldState, BlockState newState);
     void placedFromItem(const glm::ivec3& position, BlockState state, const ItemStack& stack);
     void tick(const World& world);
+    void restore(RuntimeBlockEntity entity);
 
     [[nodiscard]] RuntimeBlockEntity* find(const glm::ivec3& position);
     [[nodiscard]] const RuntimeBlockEntity* find(const glm::ivec3& position) const;
