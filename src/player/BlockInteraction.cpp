@@ -1,141 +1,79 @@
 #include "player/BlockInteraction.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <vector>
 
 #include "blocks/BlockRegistry.hpp"
+#include "items/ItemRegistry.hpp"
 #include "items/ItemStack.hpp"
 #include "lighting/LightingEngine.hpp"
 #include "player/Player.hpp"
 #include "rendering/WorldRenderer.hpp"
+#include "survival/MiningRules.hpp"
+#include "world/ItemEntitySystem.hpp"
 #include "world/World.hpp"
 
 namespace {
-
-bool samePosition(const glm::ivec3& a, const glm::ivec3& b) {
-    return a.x == b.x && a.y == b.y && a.z == b.z;
+bool samePosition(const glm::ivec3& a,const glm::ivec3& b){return a.x==b.x&&a.y==b.y&&a.z==b.z;}
+bool sameBreakingItem(const ItemStack& a,const ItemStack& b){
+    if(a.empty()&&b.empty()) return true; if(a.empty()||b.empty()) return false;
+    const auto stats=SurvivalRules::toolStats(a.itemId);
+    return a.itemId==b.itemId && a.nbt==b.nbt && (stats.maxUses>0 || a.damage==b.damage);
+}
 }
 
-} // namespace
-
-void BlockInteraction::commitEdit(World& world, LightingEngine& lighting,
-                                  WorldRenderer& renderer, const glm::ivec3& position,
-                                  BlockState state) {
-    const BlockState oldState = world.getBlock(position.x, position.y, position.z);
-    world.setBlock(position.x, position.y, position.z, state);
-    blockEntities_.blockChanged(world, position, oldState, state);
-    const std::vector<LightingChange> changes =
-        lighting.blockChangedSync(position.x, position.y, position.z);
-    renderer.blockChangedSync(position.x, position.y, position.z, changes);
+void BlockInteraction::commitEdit(World& world,LightingEngine& lighting,WorldRenderer& renderer,const glm::ivec3& p,BlockState state){
+    const BlockState old=world.getBlock(p.x,p.y,p.z); world.setBlock(p.x,p.y,p.z,state); blockEntities_.blockChanged(world,p,old,state);
+    const auto changes=lighting.blockChangedSync(p.x,p.y,p.z); renderer.blockChangedSync(p.x,p.y,p.z,changes);
+}
+void BlockInteraction::applyPlan(World& world,LightingEngine& lighting,WorldRenderer& renderer,const PlacementPlan& plan,bool notify){
+    std::vector<glm::ivec3> changed; changed.reserve(plan.changes.size());
+    for(const auto& e:plan.changes){if(world.getBlock(e.position.x,e.position.y,e.position.z)==e.state)continue;commitEdit(world,lighting,renderer,e.position,e.state);changed.push_back(e.position);}
+    if(!notify||changed.empty())return;
+    const auto added=placement_.onBlockAdded(world,changed); if(!added.empty()){PlacementPlan p;p.consumeItem=false;p.changes=added;applyPlan(world,lighting,renderer,p,false);}
+    const auto reactions=placement_.neighborReactions(world,changed); if(!reactions.empty()){PlacementPlan p;p.consumeItem=false;p.changes=reactions;applyPlan(world,lighting,renderer,p,false);}
 }
 
-void BlockInteraction::applyPlan(World& world, LightingEngine& lighting,
-                                 WorldRenderer& renderer, const PlacementPlan& plan,
-                                 bool notifyNeighbors) {
-    std::vector<glm::ivec3> changed;
-    changed.reserve(plan.changes.size());
-    for (const PlannedBlockChange& edit : plan.changes) {
-        if (world.getBlock(edit.position.x, edit.position.y, edit.position.z) == edit.state) continue;
-        commitEdit(world, lighting, renderer, edit.position, edit.state);
-        changed.push_back(edit.position);
-    }
-
-    if (!notifyNeighbors || changed.empty()) return;
-
-    const std::vector<PlannedBlockChange> added = placement_.onBlockAdded(world, changed);
-    if (!added.empty()) {
-        PlacementPlan addedPlan;
-        addedPlan.consumeItem = false;
-        addedPlan.changes = added;
-        applyPlan(world, lighting, renderer, addedPlan, false);
-    }
-
-    // World#setBlockState(..., 11) ultimately invokes neighbor notifications.
-    // Keep the dispatch outside the interaction controller: Stage 6 currently
-    // handles attachment/survival reactions and leaves redstone/tick observers
-    // to later systems on the same hook.
-    const std::vector<PlannedBlockChange> reactions = placement_.neighborReactions(world, changed);
-    if (reactions.empty()) return;
-    PlacementPlan reactionPlan;
-    reactionPlan.consumeItem = false;
-    reactionPlan.changes = reactions;
-    applyPlan(world, lighting, renderer, reactionPlan, false);
-}
-
-void BlockInteraction::removeBlock(World& world, LightingEngine& lighting,
-                                   WorldRenderer& renderer, const glm::ivec3& position) {
-    PlacementPlan plan;
-    plan.consumeItem = false;
-    plan.changes.push_back({position, makeBlockState(static_cast<std::uint16_t>(BlockId::Air))});
-    applyPlan(world, lighting, renderer, plan);
-}
-
-void BlockInteraction::tick(World& world, LightingEngine& lighting, WorldRenderer& renderer,
-                            Player& player, const glm::vec3& lookDirection,
-                            bool attacking, bool usingBlock) {
-    if (useDelay_ > 0) --useDelay_;
-    const float reach = player.gameMode() == GameMode::Creative ? 5.0F : 4.5F;
-    const auto hit = raycastBlocks(world, player.eyePosition(), lookDirection, reach);
-
-    if (usingBlock && useDelay_ == 0 && hit) {
-        // Tile-entity/container activation takes the same precedence as
-        // Block#onBlockActivated in PlayerControllerMP.
-        if (const auto blockEntityAction = blockEntities_.activate(world, *hit)) {
-            pendingBlockEntityAction_ = blockEntityAction;
-            useDelay_ = 4;
-        } else if (const auto activation = placement_.activation(world, player, lookDirection, *hit)) {
-            applyPlan(world, lighting, renderer, *activation);
-            useDelay_ = 4;
-        } else {
-            ItemStack& held = player.inventory().selected();
-            const ItemStack placedStack = held;
-            if (const auto plan = placement_.placement(world, player, lookDirection, *hit, held)) {
-                applyPlan(world, lighting, renderer, *plan);
-                for (const PlannedBlockChange& edit : plan->changes) {
-                    blockEntities_.placedFromItem(edit.position, edit.state, placedStack);
-                    const BlockId placedId = static_cast<BlockId>(blockId(edit.state));
-                    if ((placedId == BlockId::StandingSign || placedId == BlockId::WallSign) &&
-                        !pendingBlockEntityAction_)
-                        pendingBlockEntityAction_ = BlockEntityAction{BlockEntityActionType::EditSign, edit.position};
-                }
-                if (plan->consumeItem && player.gameMode() != GameMode::Creative) held.shrink(1);
-                useDelay_ = 4;
-            }
+void BlockInteraction::destroyBlock(World& world,LightingEngine& lighting,WorldRenderer& renderer,Player& player,const glm::ivec3& pos,BlockState old,bool creative){
+    if(blockId(old)==0) return;
+    if(!creative){
+        ItemStack& held=player.inventory().selected();
+        const bool harvest=SurvivalRules::canHarvest(old,held);
+        if(auto drop=SurvivalRules::primaryDrop(old,items_,harvest)){
+            itemEntities_.spawn(*drop,glm::dvec3(pos)+glm::dvec3(0.5,0.35,0.5),{0.0,0.12,0.0});
         }
+        if(BlockRegistry::get(old).hardness!=0.0F) { const ToolStats stats=SurvivalRules::toolStats(held.itemId); if(stats.toolClass!=ToolClass::None&&stats.toolClass!=ToolClass::Hoe) SurvivalRules::damageTool(held,stats.toolClass==ToolClass::Sword?2:1); }
+    }
+    PlacementPlan p;p.consumeItem=false;p.changes.push_back({pos,makeBlockState(static_cast<std::uint16_t>(BlockId::Air))});applyPlan(world,lighting,renderer,p);
+    soundEvents_.push_back({BlockSoundEventType::Break,pos,old});
+}
+
+void BlockInteraction::tick(World& world,LightingEngine& lighting,WorldRenderer& renderer,Player& player,const glm::vec3& look,bool attacking,bool usingBlock){
+    if(useDelay_>0)--useDelay_; if(attackDelay_>0)--attackDelay_;
+    const float reach=player.gameMode()==GameMode::Creative?5.0F:4.5F;
+    const auto hit=raycastBlocks(world,player.eyePosition(),look,reach);
+
+    if(usingBlock&&useDelay_==0&&hit){
+        if(const auto action=blockEntities_.activate(world,*hit)){pendingBlockEntityAction_=action;useDelay_=4;}
+        else if(const auto activation=placement_.activation(world,player,look,*hit)){applyPlan(world,lighting,renderer,*activation);useDelay_=4;}
+        else {ItemStack& held=player.inventory().selected();const ItemStack placed=held;if(const auto plan=placement_.placement(world,player,look,*hit,held)){
+            applyPlan(world,lighting,renderer,*plan);for(const auto& e:plan->changes){blockEntities_.placedFromItem(e.position,e.state,placed);const BlockId id=static_cast<BlockId>(blockId(e.state));if((id==BlockId::StandingSign||id==BlockId::WallSign)&&!pendingBlockEntityAction_)pendingBlockEntityAction_=BlockEntityAction{BlockEntityActionType::EditSign,e.position};}
+            if(plan->consumeItem&&player.gameMode()!=GameMode::Creative)held.shrink(1);useDelay_=4;}}
     }
 
-    if (!attacking || !hit) {
-        breakingBlock_.reset();
-        breakProgress_ = 0.0F;
-        return;
-    }
+    if(!attacking||!hit||player.dead()){breakingBlock_.reset();breakingItem_.clear();breakProgress_=0;stepSoundTickCounter_=0;return;}
+    if(attackDelay_>0)return;
+    if(player.gameMode()==GameMode::Creative){if(SurvivalRules::toolStats(player.inventory().selected().itemId).toolClass==ToolClass::Sword)return;destroyBlock(world,lighting,renderer,player,hit->block,hit->state,true);attackDelay_=5;breakingBlock_.reset();breakProgress_=0;return;}
 
-    if (attackDelay_ > 0) {
-        --attackDelay_;
-        return;
+    const ItemStack& held=player.inventory().selected();
+    if(!breakingBlock_||!samePosition(*breakingBlock_,hit->block)||!sameBreakingItem(breakingItem_,held)){
+        breakingBlock_=hit->block;breakingItem_=held;breakProgress_=0;stepSoundTickCounter_=0;
     }
-
-    if (player.gameMode() == GameMode::Creative) {
-        removeBlock(world, lighting, renderer, hit->block);
-        attackDelay_ = 5;
-        breakingBlock_.reset();
-        breakProgress_ = 0.0F;
-        return;
-    }
-
-    if (!breakingBlock_ || !samePosition(*breakingBlock_, hit->block)) {
-        breakingBlock_ = hit->block;
-        breakProgress_ = 0.0F;
-    }
-
-    const BlockDefinition& definition = BlockRegistry::get(hit->state);
-    if (definition.hardness < 0.0F) return;
-    const float divisor = definition.requiresTool ? 100.0F : 30.0F;
-    breakProgress_ += 1.0F / std::max(definition.hardness, 1.0e-6F) / divisor;
-    if (breakProgress_ >= 1.0F) {
-        removeBlock(world, lighting, renderer, hit->block);
-        breakingBlock_.reset();
-        breakProgress_ = 0.0F;
-        attackDelay_ = 5;
-    }
+    const BlockDefinition& definition=BlockRegistry::get(hit->state);if(definition.hardness<0)return;
+    const MiningResult mining=SurvivalRules::mining(hit->state,held,definition.hardness);
+    breakProgress_+=mining.relativeHardness;
+    if(std::fmod(stepSoundTickCounter_,4.0F)==0.0F) soundEvents_.push_back({BlockSoundEventType::Hit,hit->block,hit->state});
+    stepSoundTickCounter_+=1.0F;
+    if(breakProgress_>=1.0F){destroyBlock(world,lighting,renderer,player,hit->block,hit->state,false);breakingBlock_.reset();breakingItem_.clear();breakProgress_=0;stepSoundTickCounter_=0;attackDelay_=5;}
 }

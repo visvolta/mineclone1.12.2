@@ -161,10 +161,8 @@ LoadedPlayerState WorldSave::loadPlayer(Player& player) const {
     if (data == nullptr) return state;
 
     state.gameMode = nbt::integer(*data, "GameType", 0) == 1 ? GameMode::Creative : GameMode::Survival;
-    state.position = {
-        static_cast<double>(nbt::integer(*data, "SpawnX", 0)) + 0.5,
-        static_cast<double>(nbt::integer(*data, "SpawnY", 80)),
-        static_cast<double>(nbt::integer(*data, "SpawnZ", 0)) + 0.5};
+    state.spawnPosition = {static_cast<double>(nbt::integer(*data,"SpawnX",0))+0.5, static_cast<double>(nbt::integer(*data,"SpawnY",80)), static_cast<double>(nbt::integer(*data,"SpawnZ",0))+0.5};
+    state.position = state.spawnPosition;
 
     const nbt::Tag* playerTag = nbt::find(*data, "Player");
     if (playerTag == nullptr || playerTag->type != nbt::Type::Compound) return state;
@@ -190,8 +188,10 @@ LoadedPlayerState WorldSave::loadPlayer(Player& player) const {
         state.yaw = std::get<float>(rotation->list()[0].value);
         state.pitch = std::get<float>(rotation->list()[1].value);
     }
-    state.selectedHotbar = static_cast<std::size_t>(
-        std::clamp<std::int64_t>(nbt::integer(stored, "SelectedItemSlot", 0), 0, 8));
+    state.selectedHotbar = static_cast<std::size_t>(std::clamp<std::int64_t>(nbt::integer(stored,"SelectedItemSlot",0),0,8));
+    state.health = static_cast<float>(nbt::number(stored,"Health",20.0));
+    state.air = static_cast<int>(nbt::integer(stored,"Air",300));
+    state.fireTicks = static_cast<int>(nbt::integer(stored,"Fire",0));
 
     if (const nbt::Tag* inventory = nbt::find(stored, "Inventory");
         inventory != nullptr && inventory->type == nbt::Type::List) {
@@ -199,12 +199,14 @@ LoadedPlayerState WorldSave::loadPlayer(Player& player) const {
             if (item.type != nbt::Type::Compound) continue;
             const nbt::Compound& itemData = item.compound();
             const int slot = static_cast<int>(nbt::integer(itemData, "Slot", -1));
-            if (slot >= 0 && slot < static_cast<int>(PlayerInventory::mainSize))
-                player.inventory().slot(static_cast<std::size_t>(slot)) = itemStackFromTag(itemData);
+            if (slot >= 0 && slot < static_cast<int>(PlayerInventory::mainSize)) player.inventory().slot(static_cast<std::size_t>(slot)) = itemStackFromTag(itemData);
+            else if (slot >= 100 && slot < 104) player.inventory().armor(static_cast<std::size_t>(slot-100)) = itemStackFromTag(itemData);
         }
     }
 
     player.restoreState(state.position, state.velocity, state.gameMode, state.selectedHotbar);
+    player.setRespawnPosition(state.spawnPosition);
+    player.restoreSurvival(state.health,state.air,state.fireTicks);
     return state;
 }
 
@@ -330,6 +332,9 @@ void WorldSave::saveLevel(const WorldConfig& config, const Player& player,
     storedPlayer["playerGameType"] = nbt::Tag(static_cast<std::int32_t>(player.gameMode() == GameMode::Creative ? 1 : 0));
     storedPlayer["SelectedItemSlot"] = nbt::Tag(static_cast<std::int32_t>(player.inventory().selectedHotbar()));
     storedPlayer["OnGround"] = nbt::Tag(static_cast<std::int8_t>(player.onGround()));
+    storedPlayer["Health"] = nbt::Tag(player.health());
+    storedPlayer["Air"] = nbt::Tag(static_cast<std::int16_t>(player.air()));
+    storedPlayer["Fire"] = nbt::Tag(static_cast<std::int16_t>(player.fireTicks()));
     storedPlayer["Pos"] = nbt::Tag(nbt::Type::Double, nbt::List{
         nbt::Tag(player.feetPosition().x), nbt::Tag(player.feetPosition().y), nbt::Tag(player.feetPosition().z)});
     storedPlayer["Motion"] = nbt::Tag(nbt::Type::Double, nbt::List{
@@ -337,10 +342,8 @@ void WorldSave::saveLevel(const WorldConfig& config, const Player& player,
     storedPlayer["Rotation"] = nbt::Tag(nbt::Type::Float, nbt::List{nbt::Tag(0.0F), nbt::Tag(0.0F)});
 
     nbt::List inventory;
-    for (std::size_t index = 0; index < PlayerInventory::mainSize; ++index) {
-        const ItemStack& stack = player.inventory().slot(index);
-        if (!stack.empty()) inventory.push_back(itemStackTag(stack, static_cast<int>(index)));
-    }
+    for (std::size_t index=0;index<PlayerInventory::mainSize;++index){const ItemStack& stack=player.inventory().slot(index);if(!stack.empty())inventory.push_back(itemStackTag(stack,static_cast<int>(index)));}
+    for (std::size_t index=0;index<4;++index){const ItemStack& stack=player.inventory().armor(index);if(!stack.empty())inventory.push_back(itemStackTag(stack,100+static_cast<int>(index)));}
     storedPlayer["Inventory"] = nbt::Tag(nbt::Type::Compound, std::move(inventory));
     data["Player"] = nbt::Tag(std::move(storedPlayer));
 

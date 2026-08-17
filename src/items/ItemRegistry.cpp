@@ -42,6 +42,32 @@ bool containsAny(std::string_view value, std::initializer_list<std::string_view>
     return false;
 }
 
+std::uint16_t itemMetadataForBlock(BlockState state) {
+    const BlockId id=static_cast<BlockId>(blockId(state)); const std::uint16_t meta=blockMetadata(state);
+    switch(id){
+        case BlockId::StoneSlab: case BlockId::WoodenSlab: return meta&7U;
+        case BlockId::StoneSlab2: case BlockId::PurpurSlab: return 0;
+        case BlockId::Log: case BlockId::Leaves: return meta&3U;
+        case BlockId::Log2: case BlockId::Leaves2: return meta&1U;
+        case BlockId::Anvil: return (meta>>2U)&3U;
+        case BlockId::StandingBanner: case BlockId::WallBanner: return meta&15U;
+        case BlockId::Bed: return meta&15U;
+        case BlockId::WoodenDoor: case BlockId::IronDoor: case BlockId::SpruceDoor: case BlockId::BirchDoor:
+        case BlockId::JungleDoor: case BlockId::AcaciaDoor: case BlockId::DarkOakDoor:
+        case BlockId::Trapdoor: case BlockId::IronTrapdoor: case BlockId::FenceGate:
+        case BlockId::SpruceFenceGate: case BlockId::BirchFenceGate: case BlockId::JungleFenceGate:
+        case BlockId::DarkOakFenceGate: case BlockId::AcaciaFenceGate:
+        case BlockId::OakStairs: case BlockId::StoneStairs: case BlockId::BrickStairs: case BlockId::StoneBrickStairs:
+        case BlockId::NetherBrickStairs: case BlockId::SandstoneStairs: case BlockId::SpruceStairs: case BlockId::BirchStairs:
+        case BlockId::JungleStairs: case BlockId::QuartzStairs: case BlockId::AcaciaStairs: case BlockId::DarkOakStairs:
+        case BlockId::RedSandstoneStairs: case BlockId::PurpurStairs:
+        case BlockId::Furnace: case BlockId::LitFurnace: case BlockId::Chest: case BlockId::TrappedChest:
+        case BlockId::Dispenser: case BlockId::Dropper: case BlockId::Hopper: case BlockId::Observer:
+            return 0;
+        default:return meta;
+    }
+}
+
 bool directBlockItemExcluded(BlockId id) {
     switch (id) {
         case BlockId::Air:
@@ -259,14 +285,14 @@ const ItemDefinition* ItemRegistry::find(std::string_view name) const {
 ItemStack ItemRegistry::stackForBlock(BlockState state, int count) const {
     const auto direct = blockStateToItem_.find(state);
     if (direct != blockStateToItem_.end())
-        return {direct->second, count, blockMetadata(state), {}};
+        return {direct->second, count, itemMetadataForBlock(state), {}};
     const auto base = blockStateToItem_.find(makeBlockState(blockId(state), 0));
     if (base != blockStateToItem_.end())
-        return {base->second, count, blockMetadata(state), {}};
+        return {base->second, count, itemMetadataForBlock(state), {}};
     const BlockId wanted = static_cast<BlockId>(blockId(state));
     for (const ItemDefinition& item : items_)
         if (item.placedBlock && *item.placedBlock == wanted)
-            return {item.id, count, blockMetadata(state), {}};
+            return {item.id, count, itemMetadataForBlock(state), {}};
     return {};
 }
 

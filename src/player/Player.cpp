@@ -7,6 +7,8 @@
 #include <glm/vec2.hpp>
 
 #include "blocks/BlockShape.hpp"
+#include "blocks/BlockRegistry.hpp"
+#include "survival/MiningRules.hpp"
 #include "world/World.hpp"
 
 namespace {
@@ -219,7 +221,13 @@ void Player::moveWithCollisions(const World& world, double x, double y, double z
 
 void Player::tick(const World& world, const PlayerInput& input, const glm::vec3& lookDirection) {
     previousPosition_ = position_;
+    if (hurtResistantTime_ > 0) --hurtResistantTime_;
     if (flyToggleTimer_ > 0) --flyToggleTimer_;
+
+    if (dead_) {
+        velocity_ *= 0.8;
+        return;
+    }
 
     if (gameMode_ == GameMode::Creative && input.jumpPressed) {
         if (flyToggleTimer_ == 0) flyToggleTimer_ = 7;
@@ -232,10 +240,7 @@ void Player::tick(const World& world, const PlayerInput& input, const glm::vec3&
 
     float strafe = input.strafe;
     float forward = input.forward;
-    if (input.sneak) {
-        strafe *= 0.3F;
-        forward *= 0.3F;
-    }
+    if (input.sneak) { strafe *= 0.3F; forward *= 0.3F; }
 
     if (flying_) {
         const float movementAmount = flySpeed * (input.sprint ? 2.0F : 1.0F);
@@ -244,10 +249,9 @@ void Player::tick(const World& world, const PlayerInput& input, const glm::vec3&
         if (input.jump) velocity_.y += flySpeed * 3.0F;
         const double previousVerticalVelocity = velocity_.y;
         moveWithCollisions(world, velocity_.x, velocity_.y, velocity_.z, false);
-        velocity_.x *= baseFriction;
-        velocity_.z *= baseFriction;
-        velocity_.y = previousVerticalVelocity * 0.6;
+        velocity_.x *= baseFriction; velocity_.z *= baseFriction; velocity_.y = previousVerticalVelocity * 0.6;
         if (onGround_) flying_ = false;
+        fallDistance_ = 0.0F;
     } else {
         if (input.jump && onGround_) {
             velocity_.y = 0.42F;
@@ -255,28 +259,86 @@ void Player::tick(const World& world, const PlayerInput& input, const glm::vec3&
                 glm::vec2 forwardFlat(lookDirection.x, lookDirection.z);
                 if (glm::dot(forwardFlat, forwardFlat) > 1.0e-6F) {
                     forwardFlat = glm::normalize(forwardFlat);
-                    velocity_.x += forwardFlat.x * 0.2;
-                    velocity_.z += forwardFlat.y * 0.2;
+                    velocity_.x += forwardFlat.x * 0.2; velocity_.z += forwardFlat.y * 0.2;
                 }
             }
         }
-
         const double friction = onGround_ ? groundSlipperiness * baseFriction : baseFriction;
         const float movementSpeed = walkSpeed * (input.sprint && forward >= 0.8F ? 1.3F : 1.0F);
-        const float acceleration = onGround_
-            ? movementSpeed * static_cast<float>(0.16277136 / (friction * friction * friction))
-            : airControl * (input.sprint ? 1.3F : 1.0F);
+        const float acceleration = onGround_ ? movementSpeed * static_cast<float>(0.16277136 / (friction * friction * friction))
+                                             : airControl * (input.sprint ? 1.3F : 1.0F);
         moveRelative(strafe, forward, acceleration, lookDirection);
         moveWithCollisions(world, velocity_.x, velocity_.y, velocity_.z, input.sneak);
-        velocity_.y -= gravity;
-        velocity_.y *= verticalDrag;
-        velocity_.x *= friction;
-        velocity_.z *= friction;
+        const double fallen = previousPosition_.y - position_.y;
+        if (!onGround_ && fallen > 0.0) fallDistance_ += static_cast<float>(fallen);
+        if (onGround_ && fallDistance_ > 0.0F) {
+            const int damage = static_cast<int>(std::ceil(fallDistance_ - 3.0F));
+            if (damage > 0) hurt(static_cast<float>(damage), DamageType::Fall);
+            fallDistance_ = 0.0F;
+        }
+        velocity_.y -= gravity; velocity_.y *= verticalDrag; velocity_.x *= friction; velocity_.z *= friction;
     }
-
-    if (position_.y < -64.0) {
-        position_ = {0.0, 64.0, 14.0};
-        previousPosition_ = position_;
-        velocity_ = {0.0, 0.0, 0.0};
-    }
+    tickSurvival(world);
 }
+
+int Player::armorValue() const {
+    int total=0; for (std::size_t i=0;i<4;++i) total += SurvivalRules::armorPoints(inventory_.armor(i).itemId); return total;
+}
+
+bool Player::hurt(float amount, DamageType type) {
+    if (gameMode_ == GameMode::Creative || dead_ || amount <= 0.0F) return false;
+    const bool bypassArmor = type == DamageType::Drown || type == DamageType::Void;
+    if (hurtResistantTime_ > 0) return false;
+    float applied = amount;
+    if (!bypassArmor) {
+        float toughness=0.0F; for(std::size_t i=0;i<4;++i) toughness += SurvivalRules::armorToughness(inventory_.armor(i).itemId);
+        const float armor=static_cast<float>(armorValue());
+        const float effective=std::clamp(armor - applied/(2.0F+toughness/4.0F), armor*0.2F, 20.0F);
+        applied *= 1.0F - effective/25.0F;
+        const int armorDamage=std::max(1,static_cast<int>(std::ceil(amount/4.0F)));
+        static constexpr int durability[20]={55,80,75,65,165,240,225,195,165,240,225,195,363,528,495,429,77,112,105,91};
+        for(std::size_t slot=0;slot<4;++slot){
+            ItemStack& a=inventory_.armor(slot); if(a.empty()||a.itemId<298||a.itemId>317) continue;
+            a.damage=static_cast<std::uint16_t>(a.damage+armorDamage);
+            if(a.damage>=durability[a.itemId-298]) a.clear();
+        }
+    }
+    health_=std::max(0.0F,health_-applied);
+    hurtResistantTime_=20;
+    if (health_<=0.0F) { health_=0.0F; dead_=true; velocity_={0.0}; flying_=false; }
+    return true;
+}
+
+void Player::restoreSurvival(float health, int air, int fireTicks, bool dead) {
+    health_=std::clamp(health,0.0F,20.0F); air_=std::clamp(air,-20,300); fireTicks_=std::max(0,fireTicks); dead_=dead||health_<=0.0F;
+}
+
+void Player::respawn() {
+    position_=respawnPosition_; previousPosition_=position_; velocity_={0.0}; health_=20.0F; air_=300; fireTicks_=0;
+    hurtResistantTime_=0; fireDamageTicker_=0; fallDistance_=0.0F; dead_=false; onGround_=false; flying_=false;
+}
+
+void Player::tickSurvival(const World& world) {
+    if (gameMode_ == GameMode::Creative) { air_=300; fireTicks_=0; return; }
+    if (position_.y < -64.0) hurt(4.0F, DamageType::Void);
+    const auto at=[&](double x,double y,double z){return static_cast<BlockId>(blockId(world.getBlock(static_cast<int>(std::floor(x)),static_cast<int>(std::floor(y)),static_cast<int>(std::floor(z)))));};
+    const BlockId eye=at(position_.x,position_.y+eyeHeight,position_.z);
+    const bool submerged=eye==BlockId::Water||eye==BlockId::FlowingWater;
+    if(submerged){ if(--air_<=-20){air_=0;hurt(2.0F,DamageType::Drown);} } else air_=300;
+
+    bool inLava=false,inFire=false,inCactus=false;
+    const Aabb b=bounds();
+    for(int y=static_cast<int>(std::floor(b.minimum.y));y<=static_cast<int>(std::floor(b.maximum.y-1e-6));++y)
+      for(int z=static_cast<int>(std::floor(b.minimum.z));z<=static_cast<int>(std::floor(b.maximum.z-1e-6));++z)
+       for(int x=static_cast<int>(std::floor(b.minimum.x));x<=static_cast<int>(std::floor(b.maximum.x-1e-6));++x){
+        const BlockId id=static_cast<BlockId>(blockId(world.getBlock(x,y,z)));
+        inLava|=id==BlockId::Lava||id==BlockId::FlowingLava; inFire|=id==BlockId::Fire; inCactus|=id==BlockId::Cactus;
+       }
+    if(inCactus) hurt(1.0F,DamageType::Cactus);
+    if(inLava){ hurt(4.0F,DamageType::Lava); fireTicks_=std::max(fireTicks_,300); }
+    if(inFire) fireTicks_=std::max(fireTicks_,160);
+    if(submerged) fireTicks_=0;
+    if(fireTicks_>0){ --fireTicks_; if(++fireDamageTicker_>=20){fireDamageTicker_=0;hurt(1.0F,DamageType::Fire);} }
+    else fireDamageTicker_=0;
+}
+

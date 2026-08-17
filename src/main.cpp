@@ -32,12 +32,14 @@
 #include "rendering/BlockRenderResources.hpp"
 #include "rendering/EnvironmentRenderer.hpp"
 #include "rendering/GameHud.hpp"
+#include "rendering/ItemEntityRenderer.hpp"
 #include "rendering/TextureAtlas.hpp"
 #include "rendering/WorldRenderer.hpp"
 #include "world/Raycast.hpp"
 #include "save/WorldSave.hpp"
 #include "world/World.hpp"
 #include "world/BlockEntitySystem.hpp"
+#include "world/ItemEntitySystem.hpp"
 #include "worldgen/ChunkStreamer.hpp"
 #include "worldgen/WorldConfig.hpp"
 
@@ -218,6 +220,7 @@ int main() {
 
         World world;
         BlockEntitySystem blockEntities;
+        ItemEntitySystem itemEntities;
         Player player({0.5, 80.0, 0.5});
         LoadedPlayerState loadedPlayer = worldSave.loadPlayer(player);
 
@@ -235,6 +238,7 @@ int main() {
                 world, static_cast<int>(std::floor(loadedPlayer.position.x)),
                 static_cast<int>(std::floor(loadedPlayer.position.z)));
             player.restoreState(loadedPlayer.position, glm::dvec3{0.0}, loadedPlayer.gameMode, loadedPlayer.selectedHotbar);
+            player.setRespawnPosition(loadedPlayer.position);
         }
 
         frontEnd->showLoading("Loading world", "Lighting terrain", 58);
@@ -259,7 +263,8 @@ int main() {
         frontEnd.reset();
         GameHud gameHud(window, BLOCKCRAFT_ASSET_ROOT, atlas, itemRegistry, blockRenderResources, blockEntities);
         BlockEntityRenderer blockEntityRenderer(BLOCKCRAFT_ASSET_ROOT, blockEntities);
-        BlockInteraction interaction(itemRegistry, blockEntities);
+        ItemEntityRenderer itemEntityRenderer(BLOCKCRAFT_ASSET_ROOT, itemRegistry);
+        BlockInteraction interaction(itemRegistry, blockEntities, itemEntities);
         camera.setPosition(player.eyePosition());
         setCursorCaptured(window, true);
         updateWindowTitle(window, player, itemRegistry, config, 0.0, world.chunkCount(),
@@ -295,7 +300,7 @@ int main() {
             glfwPollEvents();
 
             const bool escapeDown = keyDown(window, GLFW_KEY_ESCAPE);
-            if (escapeDown && !escapeWasDown) {
+            if (escapeDown && !escapeWasDown && !player.dead()) {
                 if (inventoryOpen) {
                     inventoryOpen = false;
                     gameHud.closeBlockEntityScreen();
@@ -310,7 +315,7 @@ int main() {
             escapeWasDown = escapeDown;
 
             const bool eDown = keyDown(window, GLFW_KEY_E);
-            if (eDown && !eWasDown && !paused && !gameHud.capturesTextInput()) {
+            if (eDown && !eWasDown && !paused && !player.dead() && !gameHud.capturesTextInput()) {
                 if (inventoryOpen && gameHud.hasBlockEntityScreen()) {
                     gameHud.closeBlockEntityScreen();
                     inventoryOpen = false;
@@ -384,7 +389,12 @@ int main() {
                         }
                     }
                     blockEntities.tick(world);
+                    itemEntities.tick(world, player);
                     environment.tick(world);
+                    // Stage 9 sound events are intentionally hooks only; consume them so
+                    // a future audio engine can bind exact 1.12.2 SoundType resources without
+                    // allowing the queue to grow while sounds are not implemented.
+                    for (const BlockSoundEvent& event : interaction.takeSoundEvents()) static_cast<void>(event);
                     jumpPressPending = false;
                     accumulator -= tickDuration;
                 }
@@ -395,6 +405,7 @@ int main() {
                     numberWasDown[static_cast<std::size_t>(index)] = keyDown(window, GLFW_KEY_1 + index);
             }
 
+            if (player.dead()) { inventoryOpen=false; paused=false; setCursorCaptured(window,false); }
             camera.setPosition(player.interpolatedEyePosition(
                 paused ? 0.0F : static_cast<float>(accumulator / tickDuration)));
 
@@ -434,6 +445,7 @@ int main() {
                 environmentRenderer.renderSky(environmentFrame, camera.position(), view, projection);
                 worldRenderer.render(view, projection, environmentFrame);
                 blockEntityRenderer.render(world, view, projection, partialTick);
+                itemEntityRenderer.render(itemEntities, view, projection, partialTick);
                 environmentRenderer.renderClouds(environmentFrame, camera.position(), view, projection);
                 environmentRenderer.renderWeather(environmentFrame, world, camera.position(), view, projection);
 
@@ -477,6 +489,12 @@ int main() {
                 setCursorCaptured(window, true);
                 accumulator = 0.0;
                 previousTime = glfwGetTime();
+            }
+            if (gameHud.consumeRespawnRequest()) {
+                player.respawn();
+                paused = false; inventoryOpen = false;
+                setCursorCaptured(window, true);
+                accumulator = 0.0; previousTime = glfwGetTime();
             }
             if (gameHud.consumeReturnToTitleRequest()) {
                 returnToTitle = true;

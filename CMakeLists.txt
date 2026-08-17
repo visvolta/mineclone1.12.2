@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(Blockcraft VERSION 0.13.1 LANGUAGES C CXX)
+project(Blockcraft VERSION 0.14.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -26,8 +26,11 @@ set(BLOCKCRAFT_FOUNDATION_SOURCES
     src/blocks/BlockRegistry.cpp
     src/blocks/BlockShape.cpp
     src/core/ThreadPool.cpp
+    src/core/Json.cpp
+    src/items/ItemRegistry.cpp
     src/player/Player.cpp
     src/player/PlayerInventory.cpp
+    src/survival/MiningRules.cpp
     src/world/Chunk.cpp
     src/world/World.cpp
     src/world/Raycast.cpp
@@ -222,10 +225,12 @@ set(BLOCKCRAFT_CORE_SOURCES
     src/lighting/LightingEngine.cpp
     src/player/Player.cpp
     src/player/PlayerInventory.cpp
+    src/survival/MiningRules.cpp
     src/items/ItemRegistry.cpp
     src/world/Chunk.cpp
     src/world/World.cpp
     src/world/BlockEntitySystem.cpp
+    src/world/ItemEntitySystem.cpp
     src/save/Nbt.cpp
     src/save/RegionFile.cpp
     src/save/WorldSave.cpp
@@ -254,6 +259,7 @@ add_executable(blockcraft
     src/rendering/Shader.cpp
     src/rendering/DebugRenderer.cpp
     src/rendering/BlockEntityRenderer.cpp
+    src/rendering/ItemEntityRenderer.cpp
     src/rendering/EnvironmentRenderer.cpp
     src/rendering/GameHud.cpp
     src/rendering/TextureAtlas.cpp
@@ -337,6 +343,7 @@ if(BUILD_TESTING)
         src/items/ItemRegistry.cpp
         src/player/Player.cpp
         src/player/PlayerInventory.cpp
+        src/survival/MiningRules.cpp
         src/world/Chunk.cpp
         src/world/World.cpp
         src/world/Raycast.cpp
@@ -383,6 +390,22 @@ if(BUILD_TESTING)
         target_compile_options(blockcraft_save_format_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
     endif()
     add_test(NAME blockcraft_save_formats COMMAND blockcraft_save_format_tests)
+
+    add_executable(blockcraft_survival_tests
+        tests/SurvivalTests.cpp
+        src/blocks/BlockRegistry.cpp
+        src/core/Json.cpp
+        src/items/ItemRegistry.cpp
+        src/player/PlayerInventory.cpp
+        src/survival/MiningRules.cpp
+    )
+    target_include_directories(blockcraft_survival_tests PRIVATE src)
+    if(MSVC)
+        target_compile_options(blockcraft_survival_tests PRIVATE /W4 /permissive- /UNDEBUG)
+    else()
+        target_compile_options(blockcraft_survival_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
+    endif()
+    add_test(NAME blockcraft_survival COMMAND blockcraft_survival_tests)
 endif()
 
 set_property(DIRECTORY PROPERTY VS_STARTUP_PROJECT blockcraft)

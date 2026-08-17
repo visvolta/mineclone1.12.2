@@ -25,6 +25,7 @@
 #include "lighting/LightingEngine.hpp"
 #include "items/ItemRegistry.hpp"
 #include "player/BlockInteraction.hpp"
+#include "survival/MiningRules.hpp"
 #include "player/Player.hpp"
 #include "rendering/BlockStateModelMap.hpp"
 #include "rendering/BlockRenderResources.hpp"
@@ -177,6 +178,8 @@ GameHud::GameHud(GLFWwindow* window, const std::filesystem::path& assetRoot, Tex
 
     widgetsTexture_ = loadExactTexture(
         assetRoot / "assets/minecraft/textures/gui/widgets.png", 256, 256);
+    iconsTexture_ = loadExactTexture(
+        assetRoot / "assets/minecraft/textures/gui/icons.png", 256, 256);
     std::vector<unsigned char> asciiPixels;
     asciiTexture_ = loadExactTexture(
         assetRoot / "assets/minecraft/textures/font/ascii.png", 128, 128, &asciiPixels);
@@ -222,6 +225,7 @@ GameHud::~GameHud() {
     if (creativeItemsTexture_ != 0) glDeleteTextures(1, &creativeItemsTexture_);
     if (inventoryTexture_ != 0) glDeleteTextures(1, &inventoryTexture_);
     if (asciiTexture_ != 0) glDeleteTextures(1, &asciiTexture_);
+    if (iconsTexture_ != 0) glDeleteTextures(1, &iconsTexture_);
     if (widgetsTexture_ != 0) glDeleteTextures(1, &widgetsTexture_);
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
@@ -328,6 +332,19 @@ void GameHud::beginFrame() {
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
+    // Widgets such as InvisibleButton must live inside a real ImGui window.
+    // Previously they were emitted against ImGui's implicit Debug##Default
+    // fallback window, which is why Escape could expose a strange ImGui
+    // dropdown/debug surface over the Minecraft pause menu.
+    ImGuiIO& io = ImGui::GetIO();
+    io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableKeyboard;
+    ImGui::SetNextWindowPos(ImVec2(0,0));
+    ImGui::SetNextWindowSize(io.DisplaySize);
+    ImGui::Begin("##blockcraft-hud-root", nullptr,
+        ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground |
+        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+        ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus);
+    frameHostOpen_ = true;
 }
 
 bool GameHud::drawBuiltinEntityStack(const ItemStack& stack, float x, float y, int scaleFactor) const {
@@ -521,8 +538,11 @@ void GameHud::drawTooltip(const ItemStack& stack, float mouseX, float mouseY,
     if (stack.empty()) return;
     const ItemDefinition& item = items_.get(stack.itemId);
     std::string line = items_.stackDisplayName(stack);
-    const float width = textWidth(line) + 8.0F;
-    const float height = 16.0F;
+    const ToolStats tool = SurvivalRules::toolStats(stack.itemId);
+    std::string durability;
+    if (tool.maxUses > 0) durability = "Durability: " + std::to_string(std::max(0, tool.maxUses - static_cast<int>(stack.damage))) + " / " + std::to_string(tool.maxUses);
+    const float width = std::max(textWidth(line), durability.empty() ? 0.0F : textWidth(durability)) + 8.0F;
+    const float height = durability.empty() ? 16.0F : 26.0F;
     float x = mouseX + 12.0F;
     float y = mouseY - 12.0F;
     if (x + width > scaledWidth) x = mouseX - width - 4.0F;
@@ -543,6 +563,7 @@ void GameHud::drawTooltip(const ItemStack& stack, float mouseX, float mouseY,
     draw->AddRectFilled(ImVec2((x-2)*sx,(y-3)*sy), ImVec2((x+width+2)*sx,(y+height+3)*sy), innerPurple);
     draw->AddRectFilled(ImVec2((x-1)*sx,(y-2)*sy), ImVec2((x+width+1)*sx,(y+height+2)*sy), centre);
     drawText(x + 4.0F, y + 4.0F, line, scaleFactor, false, 0xFFFFFFFFU);
+    if (!durability.empty()) drawText(x + 4.0F, y + 14.0F, durability, scaleFactor, false, 0xFFAAAAAAU);
 }
 
 void GameHud::renderHotbar(const Player& player, int scaledWidth,
@@ -635,6 +656,25 @@ void GameHud::renderSurvivalInventory(Player& player, int scaledWidth,
     ItemStack hovered{};
     const bool leftClick = ImGui::IsMouseClicked(ImGuiMouseButton_Left);
     const bool rightClick = ImGui::IsMouseClicked(ImGuiMouseButton_Right);
+    // InventoryPlayer exposes four armor slots separately from the 36 main slots.
+    // Slot order here is helmet, chest, legs, boots on screen, while storage is
+    // boots, legs, chest, helmet to mirror 1.12.2 armorItemInSlot.
+    for (int visual = 0; visual < 4; ++visual) {
+        const int armorIndex = 3 - visual;
+        const float x = left + 8.0F, y = top + 8.0F + visual * 18.0F;
+        ItemStack& armor = player.inventory().armor(static_cast<std::size_t>(armorIndex));
+        drawStack(armor, x + 1.0F, y + 1.0F, scaleFactor);
+        if (mx >= x && mx < x+18 && my >= y && my < y+18) {
+            hovered = armor;
+            if (leftClick) {
+                if (cursorStack_.empty()) { cursorStack_ = armor; armor.clear(); }
+                else if (SurvivalRules::isArmorForSlot(cursorStack_.itemId, armorIndex)) std::swap(cursorStack_, armor);
+            } else if (rightClick && armor.empty() && !cursorStack_.empty() &&
+                       SurvivalRules::isArmorForSlot(cursorStack_.itemId, armorIndex)) {
+                armor = cursorStack_; armor.count = 1; cursorStack_.shrink(1);
+            }
+        }
+    }
     for (int row = 0; row < 3; ++row) for (int column = 0; column < 9; ++column) {
         const std::size_t index = static_cast<std::size_t>(9 + row * 9 + column);
         const float x = left + 8.0F + column * 18.0F;
@@ -1173,6 +1213,31 @@ void GameHud::renderPauseMenu(int scaledWidth, int scaledHeight, int scaleFactor
         returnToTitleRequested_ = true;
 }
 
+
+void GameHud::renderSurvivalStatus(const Player& player, int scaledWidth, int scaledHeight, int scaleFactor) const {
+    if (player.gameMode() != GameMode::Survival || player.dead()) return;
+    ImDrawList* draw=ImGui::GetBackgroundDrawList(); const ImGuiIO& io=ImGui::GetIO();
+    const float sx=static_cast<float>(scaleFactor)/std::max(io.DisplayFramebufferScale.x,1.0e-6F);
+    const float sy=static_cast<float>(scaleFactor)/std::max(io.DisplayFramebufferScale.y,1.0e-6F);
+    const float left=static_cast<float>(scaledWidth/2-91); const float y=static_cast<float>(scaledHeight-39);
+    const auto icon=[&](float x,float yy,int u,int v){draw->AddImage(textureId(iconsTexture_),ImVec2(x*sx,yy*sy),ImVec2((x+9)*sx,(yy+9)*sy),ImVec2(u/256.0F,v/256.0F),ImVec2((u+9)/256.0F,(v+9)/256.0F));};
+    const int hp=std::clamp(static_cast<int>(std::ceil(player.health())),0,20);
+    for(int i=0;i<10;++i){icon(left+i*8.0F,y,16,0); if(hp>=i*2+2)icon(left+i*8.0F,y,52,0); else if(hp==i*2+1)icon(left+i*8.0F,y,61,0);}
+    const int armor=std::clamp(player.armorValue(),0,20);
+    if(armor>0){for(int i=0;i<10;++i){icon(left+i*8.0F,y-10,16,9);if(armor>=i*2+2)icon(left+i*8.0F,y-10,34,9);else if(armor==i*2+1)icon(left+i*8.0F,y-10,25,9);}}
+    if(player.air()<300){const int bubbles=static_cast<int>(std::ceil((player.air()-2)*10.0/300.0));const int partial=static_cast<int>(std::ceil(player.air()*10.0/300.0))-bubbles;for(int i=0;i<bubbles+partial;++i)icon(static_cast<float>(scaledWidth/2+91-(i+1)*8),y-10,i<bubbles?16:25,18);}
+}
+
+void GameHud::renderDeathScreen(const Player& player, int scaledWidth, int scaledHeight, int scaleFactor) {
+    if(!player.dead()) return;
+    ImDrawList* draw=ImGui::GetBackgroundDrawList();const ImGuiIO& io=ImGui::GetIO();const float sx=static_cast<float>(scaleFactor)/std::max(io.DisplayFramebufferScale.x,1e-6F),sy=static_cast<float>(scaleFactor)/std::max(io.DisplayFramebufferScale.y,1e-6F);
+    draw->AddRectFilled(ImVec2(0,0),ImVec2(scaledWidth*sx,scaledHeight*sy),IM_COL32(90,0,0,115));
+    const float cx=scaledWidth*0.5F; drawText(cx-textWidth("You died!")*0.5F,scaledHeight*0.25F-10,"You died!",scaleFactor,false,0xFFFFFFFFU);
+    drawText(cx-textWidth("Score: 0")*0.5F,scaledHeight*0.25F+14,"Score: 0",scaleFactor,false,0xFFFFFFFFU);
+    if(menuButton(500,cx-100,scaledHeight*0.25F+72,200,"Respawn",scaleFactor))respawnRequested_=true;
+    if(menuButton(501,cx-100,scaledHeight*0.25F+96,200,"Title screen",scaleFactor))returnToTitleRequested_=true;
+}
+
 void GameHud::render(const World& world, Player& player, const Camera& camera,
                      const WorldConfig& config, const ChunkStreamer& streamer,
                      const LightingEngine& lighting, const WorldRenderer& renderer,
@@ -1181,7 +1246,8 @@ void GameHud::render(const World& world, Player& player, const Camera& camera,
                      bool showDebug, bool paused, bool inventoryOpen) {
     const ScaledResolution scaled = ScaledResolution::fromDisplay(
         framebufferWidth, framebufferHeight, config.guiScale, false);
-    if (!inventoryOpen) renderHotbar(player, scaled.scaledWidth, scaled.scaledHeight, scaled.scaleFactor);
+    if (!inventoryOpen && !player.dead()) renderHotbar(player, scaled.scaledWidth, scaled.scaledHeight, scaled.scaleFactor);
+    if (!inventoryOpen) renderSurvivalStatus(player, scaled.scaledWidth, scaled.scaledHeight, scaled.scaleFactor);
     if (showDebug && !inventoryOpen)
         renderDebug(world, player, camera, config, streamer, lighting, renderer, hit,
                     scaled.scaledWidth, scaled.scaledHeight, scaled.scaleFactor,
@@ -1193,11 +1259,12 @@ void GameHud::render(const World& world, Player& player, const Camera& camera,
             renderInventory(player, player.gameMode() == GameMode::Creative,
                             scaled.scaledWidth, scaled.scaledHeight, scaled.scaleFactor);
     }
-    if (paused && !inventoryOpen)
-        renderPauseMenu(scaled.scaledWidth, scaled.scaledHeight, scaled.scaleFactor);
+    if (player.dead()) renderDeathScreen(player, scaled.scaledWidth, scaled.scaledHeight, scaled.scaleFactor);
+    else if (paused && !inventoryOpen) renderPauseMenu(scaled.scaledWidth, scaled.scaledHeight, scaled.scaleFactor);
 }
 
 void GameHud::endFrame() {
+    if (frameHostOpen_) { ImGui::End(); frameHostOpen_ = false; }
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 }

@@ -50,6 +50,7 @@ public:
     bool consumeScreenCloseRequest() { const bool value=screenCloseRequested_; screenCloseRequested_=false; return value; }
     bool consumeResumeRequest() { const bool value=resumeRequested_; resumeRequested_=false; return value; }
     bool consumeReturnToTitleRequest() { const bool value=returnToTitleRequested_; returnToTitleRequested_=false; return value; }
+    bool consumeRespawnRequest() { const bool value=respawnRequested_; respawnRequested_=false; return value; }
     [[nodiscard]] bool capturesTextInput() const { return searchFocused_ || (activeBlockEntityAction_ && activeBlockEntityAction_->type == BlockEntityActionType::EditSign); }
 
 private:
@@ -80,6 +81,8 @@ private:
     void renderContainerScreen(const World& world, Player& player, int scaledWidth, int scaledHeight, int scaleFactor);
     void renderSignEditor(int scaledWidth, int scaledHeight, int scaleFactor);
     void renderPauseMenu(int scaledWidth, int scaledHeight, int scaleFactor);
+    void renderSurvivalStatus(const Player& player, int scaledWidth, int scaledHeight, int scaleFactor) const;
+    void renderDeathScreen(const Player& player, int scaledWidth, int scaledHeight, int scaleFactor);
     bool menuButton(int id, float x, float y, float width, std::string_view label,
                     int scaleFactor, bool enabled = true);
     void renderDebug(const World& world, const Player& player, const Camera& camera,
@@ -95,6 +98,7 @@ private:
     const BlockRenderResources& resources_;
     BlockEntitySystem& blockEntities_;
     GLuint widgetsTexture_ = 0;
+    GLuint iconsTexture_ = 0;
     GLuint asciiTexture_ = 0;
     GLuint inventoryTexture_ = 0;
     GLuint creativeItemsTexture_ = 0;
@@ -118,4 +122,6 @@ private:
     bool screenCloseRequested_ = false;
     bool resumeRequested_ = false;
     bool returnToTitleRequested_ = false;
+    bool respawnRequested_ = false;
+    bool frameHostOpen_ = false;
 };

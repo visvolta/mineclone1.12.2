@@ -48,6 +48,10 @@ struct LoadedPlayerState {
     float pitch = 0.0F;
     GameMode gameMode = GameMode::Survival;
     std::size_t selectedHotbar = 0;
+    glm::dvec3 spawnPosition{0.5,80.0,0.5};
+    float health = 20.0F;
+    int air = 300;
+    int fireTicks = 0;
 };
 
 class WorldSave {

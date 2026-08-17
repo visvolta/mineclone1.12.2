@@ -7,6 +7,7 @@
 class World;
 
 enum class GameMode { Survival, Creative };
+enum class DamageType { Generic, Fall, Drown, Fire, Lava, Cactus, Void };
 
 struct Aabb {
     glm::dvec3 minimum;
@@ -46,11 +47,22 @@ public:
     [[nodiscard]] Aabb bounds() const;
     [[nodiscard]] bool intersectsBlock(const World& world, const glm::ivec3& block) const;
     [[nodiscard]] PlayerInventory& inventory() { return inventory_; }
+    [[nodiscard]] float health() const { return health_; }
+    [[nodiscard]] float maxHealth() const { return 20.0F; }
+    [[nodiscard]] int air() const { return air_; }
+    [[nodiscard]] int fireTicks() const { return fireTicks_; }
+    [[nodiscard]] bool dead() const { return dead_; }
+    [[nodiscard]] int armorValue() const;
+    bool hurt(float amount, DamageType type = DamageType::Generic);
+    void respawn();
+    void setRespawnPosition(glm::dvec3 value) { respawnPosition_ = value; }
+    void restoreSurvival(float health, int air, int fireTicks, bool dead = false);
     [[nodiscard]] const PlayerInventory& inventory() const { return inventory_; }
 
 private:
     void moveWithCollisions(const World& world, double x, double y, double z, bool sneaking);
     void moveRelative(float strafe, float forward, float amount, const glm::vec3& lookDirection);
+    void tickSurvival(const World& world);
 
     glm::dvec3 position_;
     glm::dvec3 previousPosition_;
@@ -60,4 +72,12 @@ private:
     bool flying_ = false;
     bool onGround_ = false;
     int flyToggleTimer_ = 0;
+    glm::dvec3 respawnPosition_{0.5, 80.0, 0.5};
+    float health_ = 20.0F;
+    float fallDistance_ = 0.0F;
+    int air_ = 300;
+    int fireTicks_ = 0;
+    int hurtResistantTime_ = 0;
+    int fireDamageTicker_ = 0;
+    bool dead_ = false;
 };

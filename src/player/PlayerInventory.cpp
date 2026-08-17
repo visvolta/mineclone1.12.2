@@ -1,4 +1,5 @@
 #include "player/PlayerInventory.hpp"
+#include <algorithm>
 
 PlayerInventory::PlayerInventory() = default;
 
@@ -29,4 +30,24 @@ void PlayerInventory::pickCreative(const ItemStack& stack) {
         return;
     }
     main_[selectedHotbar_] = stack;
+}
+
+void PlayerInventory::addStack(ItemStack& stack) {
+    if (stack.empty()) return;
+    const int maxStack = 64;
+    for (ItemStack& slot : main_) {
+        if (stack.empty()) return;
+        if (!slot.empty() && slot.sameItem(stack) && slot.count < maxStack) {
+            const int moved = std::min(maxStack - slot.count, stack.count);
+            slot.count += moved;
+            stack.shrink(moved);
+        }
+    }
+    for (ItemStack& slot : main_) {
+        if (stack.empty()) return;
+        if (slot.empty()) {
+            const int moved = std::min(maxStack, stack.count);
+            slot = stack; slot.count = moved; stack.shrink(moved);
+        }
+    }
 }
