@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(Blockcraft VERSION 0.14.0 LANGUAGES C CXX)
+project(Blockcraft VERSION 0.14.2 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -8,6 +8,27 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 include(FetchContent)
+
+# Keep third-party source checkouts outside the disposable build tree.  This
+# makes clean rebuilds deterministic and avoids re-downloading every dependency
+# whenever build/ is removed.
+set(FETCHCONTENT_BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/.deps" CACHE PATH
+    "Persistent Blockcraft FetchContent cache" FORCE)
+set(FETCHCONTENT_UPDATES_DISCONNECTED ON CACHE BOOL
+    "Do not contact remotes again after a dependency has been populated" FORCE)
+
+# If a previous configure downloaded a dependency successfully but failed later
+# in that dependency's sub-build, reuse the valid checkout directly on the next
+# configure. This avoids re-cloning after transient GitHub/HTTP failures.
+foreach(blockcraft_dep IN ITEMS glm glfw glad stb zlib imgui)
+    string(TOUPPER "${blockcraft_dep}" blockcraft_dep_upper)
+    set(blockcraft_dep_source "${FETCHCONTENT_BASE_DIR}/${blockcraft_dep}-src")
+    if(EXISTS "${blockcraft_dep_source}/.git")
+        set("FETCHCONTENT_SOURCE_DIR_${blockcraft_dep_upper}" "${blockcraft_dep_source}"
+            CACHE PATH "Reuse populated ${blockcraft_dep} checkout" FORCE)
+    endif()
+endforeach()
+
 find_package(Threads REQUIRED)
 
 option(BLOCKCRAFT_REQUIRE_MINECRAFT_ASSETS

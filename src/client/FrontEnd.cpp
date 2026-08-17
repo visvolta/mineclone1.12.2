@@ -151,7 +151,9 @@ FrontEnd::FrontEnd(GLFWwindow* window, const std::filesystem::path& assetRoot,
         splash_ = "Minecraft!";
     }
 
-    std::strncpy(worldNameBuffer_.data(), "New World", worldNameBuffer_.size() - 1);
+    worldNameBuffer_.fill('\0');
+    constexpr char defaultWorldName[] = "New World";
+    std::copy_n(defaultWorldName, sizeof(defaultWorldName) - 1, worldNameBuffer_.begin());
     refreshWorlds();
     initPanorama();
 }

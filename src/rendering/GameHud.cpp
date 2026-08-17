@@ -53,7 +53,7 @@ struct GuiEntityQuad {
 
 void appendGuiEntityFace(std::vector<GuiEntityQuad>& out,
                          const std::array<glm::vec3,4>& positions,
-                         float u1, float v1, float u2, float v2,
+                         int u1, int v1, int u2, int v2,
                          int textureWidth, int textureHeight, float shade) {
     GuiEntityQuad quad;
     quad.positions = positions;
@@ -1063,7 +1063,7 @@ void GameHud::renderDebug(const World& world, const Player& player, const Camera
         const glm::vec3 front = glm::normalize(camera.front());
         const glm::vec3 worldUp{0.0F, 1.0F, 0.0F};
         glm::vec3 right = glm::cross(front, worldUp);
-        if (glm::dot(right, right) < 1.0e-6F) right = {1.0F, 0.0F, 0.0F};
+        if (glm::dot(right, right) < 1.0e-6F) right = glm::vec3(1.0F, 0.0F, 0.0F);
         else right = glm::normalize(right);
         const glm::vec3 up = glm::normalize(glm::cross(right, front));
         const ImGuiIO& io = ImGui::GetIO();

@@ -68,6 +68,39 @@ std::uint16_t itemMetadataForBlock(BlockState state) {
     }
 }
 
+
+bool hasVariantBlockItemModel(BlockId id) {
+    switch (id) {
+        case BlockId::Planks:
+        case BlockId::Sapling:
+        case BlockId::Log:
+        case BlockId::Log2:
+        case BlockId::Leaves:
+        case BlockId::Leaves2:
+        case BlockId::TallGrass:
+        case BlockId::DeadBush:
+        case BlockId::Wool:
+        case BlockId::YellowFlower:
+        case BlockId::RedFlower:
+        case BlockId::Fence:
+        case BlockId::FenceGate:
+        case BlockId::WoodenSlab:
+        case BlockId::Anvil:
+        case BlockId::MonsterEgg:
+        case BlockId::StainedGlass:
+        case BlockId::StainedHardenedClay:
+        case BlockId::StainedGlassPane:
+        case BlockId::Carpet:
+        case BlockId::DoublePlant:
+        case BlockId::StoneSlab2:
+        case BlockId::Concrete:
+        case BlockId::ConcretePowder:
+            return true;
+        default:
+            return false;
+    }
+}
+
 bool directBlockItemExcluded(BlockId id) {
     switch (id) {
         case BlockId::Air:
@@ -241,7 +274,7 @@ void ItemRegistry::registerBlockItems(const std::filesystem::path& assetRoot) {
         const BlockId block = static_cast<BlockId>(numericId);
         if (directBlockItemExcluded(block)) continue;
         const std::string name(BlockRegistry::legacyName(numericId));
-        if (!std::filesystem::exists(modelRoot / (name + ".json"))) continue;
+        if (!std::filesystem::exists(modelRoot / (name + ".json")) && !hasVariantBlockItemModel(block)) continue;
         ItemDefinition definition;
         definition.id = numericId;
         definition.name = name;
@@ -367,7 +400,7 @@ std::string ItemRegistry::stackDisplayName(const ItemStack& stack) const {
         };
         return std::string(skulls[std::min<std::size_t>(meta, 5)]);
     }
-    if (item.id == 425) return std::string(color(15U-meta)) + " Banner";
+    if (item.id == 425) return std::string(color(meta)) + " Banner";
     if (item.id == 349) {
         constexpr std::array<std::string_view, 4> names = {"Raw Fish", "Raw Salmon", "Clownfish", "Pufferfish"};
         return std::string(names[std::min<std::size_t>(meta, 3)]);

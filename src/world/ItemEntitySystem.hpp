@@ -13,9 +13,9 @@ class World;
 struct ItemEntity {
     std::uint64_t id = 0;
     ItemStack stack{};
-    glm::dvec3 position{0.0};
-    glm::dvec3 previousPosition{0.0};
-    glm::dvec3 velocity{0.0};
+    glm::dvec3 position = glm::dvec3(0.0);
+    glm::dvec3 previousPosition = glm::dvec3(0.0);
+    glm::dvec3 velocity = glm::dvec3(0.0);
     int age = 0;
     int pickupDelay = 10;
     float rotation = 0.0F;

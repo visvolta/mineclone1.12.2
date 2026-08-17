@@ -4,7 +4,7 @@
 
 class Camera {
 public:
-    explicit Camera(glm::vec3 position = {0.0F, 0.0F, 3.0F});
+    explicit Camera(glm::vec3 position = glm::vec3(0.0F, 0.0F, 3.0F));
 
     [[nodiscard]] glm::mat4 viewMatrix() const;
     [[nodiscard]] const glm::vec3& position() const { return position_; }

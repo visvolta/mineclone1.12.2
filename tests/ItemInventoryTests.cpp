@@ -43,6 +43,10 @@ int main() {
     assert(static_cast<int>(CreativeTab::Search) == 5);
     assert(static_cast<int>(CreativeTab::Misc) == 6);
     assert(static_cast<int>(CreativeTab::Inventory) == 11);
+    assert(items.get(static_cast<std::uint16_t>(BlockId::Planks)).name == "planks");
+    assert(items.get(static_cast<std::uint16_t>(BlockId::Wool)).name == "wool");
+    assert(items.get(static_cast<std::uint16_t>(BlockId::Anvil)).name == "anvil");
+
     const ItemDefinition& whiteShulker = items.get(static_cast<std::uint16_t>(BlockId::WhiteShulkerBox));
     assert(whiteShulker.iconResource == "minecraft:blocks/shulker_top_white");
 

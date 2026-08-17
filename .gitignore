@@ -3,6 +3,7 @@
 /build-*/
 /cmake-build-*/
 /.vs/
+/.deps/
 
 # CMake generated files if a build is accidentally configured in-tree
 CMakeCache.txt

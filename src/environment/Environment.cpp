@@ -249,9 +249,9 @@ EnvironmentFrame Environment::sample(const World& world, const glm::vec3& camera
         result.cloudColor = glm::mix(glm::vec3(gray), result.cloudColor, 1.0F - result.thunderStrength * 0.95F);
     }
 
-    result.fogColor = {0.7529412F * (daylight * 0.94F + 0.06F),
-                       0.84705883F * (daylight * 0.94F + 0.06F),
-                       daylight * 0.91F + 0.09F};
+    result.fogColor = glm::vec3(0.7529412F * (daylight * 0.94F + 0.06F),
+                                0.84705883F * (daylight * 0.94F + 0.06F),
+                                daylight * 0.91F + 0.09F);
     const float horizonCosine = std::cos(result.celestialAngle * pi * 2.0F);
     if (horizonCosine >= -0.4F && horizonCosine <= 0.4F && config_.viewDistance >= 4) {
         const float phase = horizonCosine / 0.4F * 0.5F + 0.5F;
@@ -275,11 +275,11 @@ EnvironmentFrame Environment::sample(const World& world, const glm::vec3& camera
     result.inLava = cameraBlock == BlockId::Lava;
     const float farPlane = static_cast<float>(config_.viewDistance * chunkSize);
     if (result.underwater) {
-        result.fogColor = {0.02F, 0.02F, 0.2F};
+        result.fogColor = glm::vec3(0.02F, 0.02F, 0.2F);
         result.fogMode = FogMode::Exponential;
         result.fogDensity = 0.1F;
     } else if (result.inLava) {
-        result.fogColor = {0.6F, 0.1F, 0.0F};
+        result.fogColor = glm::vec3(0.6F, 0.1F, 0.0F);
         result.fogMode = FogMode::Exponential;
         result.fogDensity = 2.0F;
     } else {

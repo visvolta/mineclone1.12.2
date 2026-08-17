@@ -17,7 +17,8 @@ int main(){
     const BlockState ironOre=makeBlockState(static_cast<std::uint16_t>(BlockId::IronOre));
     const auto hand=SurvivalRules::mining(stone,{},1.5F);
     const auto pick=SurvivalRules::mining(stone,{257,1,0,{}},1.5F);
-    assert(std::abs(hand.relativeHardness-(1.0F/1.5F/30.0F))<1e-6F);
+    assert(!hand.canHarvest);
+    assert(std::abs(hand.relativeHardness-(1.0F/1.5F/100.0F))<1e-6F);
     assert(std::abs(pick.relativeHardness-(6.0F/1.5F/30.0F))<1e-6F);
     assert(!SurvivalRules::canHarvest(ironOre,{270,1,0,{}}));
     assert(SurvivalRules::canHarvest(ironOre,{274,1,0,{}}));

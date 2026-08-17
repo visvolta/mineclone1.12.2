@@ -76,7 +76,7 @@ std::uint8_t Chunk::blockLight(int localX, int y, int localZ) const {
 std::uint16_t Chunk::applyLighting(const std::vector<std::uint8_t>& sky,
                                    const std::vector<std::uint8_t>& block,
                                    std::uint8_t* dirtyBorders) {
-    constexpr std::size_t cellCount = static_cast<std::size_t>(chunkSize * chunkHeight * chunkSize);
+    [[maybe_unused]] constexpr std::size_t cellCount = static_cast<std::size_t>(chunkSize * chunkHeight * chunkSize);
     assert(sky.size() == cellCount && block.size() == cellCount);
     std::uint16_t dirtySections = 0;
     std::uint8_t borders = 0;

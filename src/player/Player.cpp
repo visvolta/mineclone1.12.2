@@ -171,7 +171,7 @@ void Player::moveRelative(float strafe, float forward, float amount, const glm::
     forward *= scale;
 
     glm::vec2 forwardFlat(lookDirection.x, lookDirection.z);
-    if (glm::dot(forwardFlat, forwardFlat) < 1.0e-6F) forwardFlat = {0.0F, -1.0F};
+    if (glm::dot(forwardFlat, forwardFlat) < 1.0e-6F) forwardFlat = glm::vec2(0.0F, -1.0F);
     forwardFlat = glm::normalize(forwardFlat);
     const glm::vec2 right(-forwardFlat.y, forwardFlat.x);
     const glm::vec2 movement = forwardFlat * forward + right * strafe;

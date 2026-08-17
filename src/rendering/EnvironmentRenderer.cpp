@@ -359,7 +359,7 @@ struct EnvironmentRenderer::Implementation {
     }
 
     void uniforms(const glm::mat4& model, const glm::mat4& view, const glm::mat4& projection,
-                  const glm::vec4& color, bool textured, bool cutout, const glm::vec2& uvOffset = {}) {
+                  const glm::vec4& color, bool textured, bool cutout, const glm::vec2& uvOffset = glm::vec2(0.0F)) {
         shader.use();
         shader.setMat4(modelLocation, model);
         shader.setMat4(viewLocation, view);

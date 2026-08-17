@@ -62,7 +62,7 @@ float lightAt(const World& world, const glm::ivec3& p) {
 }
 
 void pushModelQuad(std::vector<V>& out, const std::array<glm::vec3,4>& p,
-                   float u1,float v1,float u2,float v2,int tw,int th,float shade) {
+                   int u1,int v1,int u2,int v2,int tw,int th,float shade) {
     // TexturedQuad(vertices,u1,v1,u2,v2) in 1.12.2 assigns:
     // v0=(u2,v1), v1=(u1,v1), v2=(u1,v2), v3=(u2,v2).
     const float a=u1/static_cast<float>(tw), b=v1/static_cast<float>(th);

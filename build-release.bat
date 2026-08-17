@@ -38,22 +38,51 @@ if not exist "%CTEST_EXE%" (
     exit /b 1
 )
 
-echo Using CMake: %CMAKE_EXE%
-echo Using build directory: %CD%\build
-echo.
-rem CMake 4.x no longer supports some policy levels used by older third-party
-rem projects. The project handles GLM as header-only, and this cache setting keeps
-rem any remaining legacy FetchContent projects on a safe modern policy floor.
-"%CMAKE_EXE%" -S . -B build -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTING=ON -DBLOCKCRAFT_REQUIRE_MINECRAFT_ASSETS=ON -DCMAKE_POLICY_VERSION_MINIMUM=3.10
+where git >nul 2>&1
 if errorlevel 1 (
     echo.
-    echo Initial configure failed. Clearing stale FetchContent sub-build state and retrying once...
-    if exist "build\_deps\glm-subbuild" rmdir /s /q "build\_deps\glm-subbuild"
-    if exist "build\_deps\glm-build" rmdir /s /q "build\_deps\glm-build"
-    if exist "build\_deps\glm-src" rmdir /s /q "build\_deps\glm-src"
-    "%CMAKE_EXE%" -S . -B build -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTING=ON -DBLOCKCRAFT_REQUIRE_MINECRAFT_ASSETS=ON -DCMAKE_POLICY_VERSION_MINIMUM=3.10
-    if errorlevel 1 goto :failed
+    echo ERROR: Git was not found. FetchContent requires Git for the pinned dependencies.
+    echo Install Git for Windows, then run this script again.
+    echo.
+    pause
+    exit /b 1
 )
+
+set CONFIGURE_ARGS=-S . -B build -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTING=ON -DBLOCKCRAFT_REQUIRE_MINECRAFT_ASSETS=ON -DCMAKE_POLICY_VERSION_MINIMUM=3.10
+
+echo Using CMake: %CMAKE_EXE%
+echo Using build directory: %CD%\build
+echo Using persistent dependency cache: %CD%\.deps
+echo.
+
+set /a CONFIGURE_ATTEMPT=1
+:configure
+"%CMAKE_EXE%" %CONFIGURE_ARGS%
+if not errorlevel 1 goto :configured
+
+if %CONFIGURE_ATTEMPT% GEQ 4 goto :failed
+
+echo.
+echo Configure attempt %CONFIGURE_ATTEMPT% failed. Retaining completed dependency sources and resetting only transient FetchContent state...
+for %%D in (glm glfw glad stb zlib imgui) do (
+    if exist ".deps\%%D-subbuild" rmdir /s /q ".deps\%%D-subbuild"
+    if exist ".deps\%%D-build" rmdir /s /q ".deps\%%D-build"
+    if exist ".deps\%%D-src\.git" (
+        git -C ".deps\%%D-src" rev-parse --verify HEAD >nul 2>&1
+        if errorlevel 1 (
+            echo Removing incomplete %%D source checkout...
+            rmdir /s /q ".deps\%%D-src"
+        )
+    )
+)
+if exist "build\CMakeCache.txt" del /q "build\CMakeCache.txt"
+if exist "build\CMakeFiles" rmdir /s /q "build\CMakeFiles"
+set /a CONFIGURE_ATTEMPT+=1
+echo Retrying in 3 seconds...
+timeout /t 3 /nobreak >nul
+goto :configure
+
+:configured
 "%CMAKE_EXE%" --build build --config Release --target blockcraft blockcraft_tests blockcraft_registry_tests blockcraft_foundation_tests blockcraft_rendering_parity_tests blockcraft_item_inventory_tests blockcraft_placement_rules_tests blockcraft_block_entity_tests blockcraft_save_format_tests blockcraft_survival_tests --parallel --clean-first
 if errorlevel 1 goto :failed
 "%CTEST_EXE%" --test-dir build -C Release --output-on-failure
@@ -72,7 +101,8 @@ exit /b 0
 
 :failed
 echo.
-echo Release build failed. Review the error shown above.
+echo Release build failed. Review the first actual compiler/linker error shown above.
+echo FetchContent sources are kept in .deps so a clean build folder does not redownload them.
 echo.
 pause
 exit /b 1
