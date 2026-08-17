@@ -24,7 +24,7 @@ struct ItemEntity {
 
 class ItemEntitySystem {
 public:
-    void spawn(ItemStack stack, glm::dvec3 position, glm::dvec3 velocity = {0.0});
+    void spawn(ItemStack stack, glm::dvec3 position, glm::dvec3 velocity = glm::dvec3(0.0));
     void tick(const World& world, Player& player);
     void clearRemoved();
     [[nodiscard]] const std::vector<ItemEntity>& entities() const { return entities_; }

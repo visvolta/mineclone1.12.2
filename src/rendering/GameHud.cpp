@@ -536,7 +536,6 @@ void GameHud::drawStack(const ItemStack& stack, float x, float y, int scaleFacto
 void GameHud::drawTooltip(const ItemStack& stack, float mouseX, float mouseY,
                           int scaledWidth, int scaledHeight, int scaleFactor) const {
     if (stack.empty()) return;
-    const ItemDefinition& item = items_.get(stack.itemId);
     std::string line = items_.stackDisplayName(stack);
     const ToolStats tool = SurvivalRules::toolStats(stack.itemId);
     std::string durability;

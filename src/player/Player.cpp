@@ -305,7 +305,7 @@ bool Player::hurt(float amount, DamageType type) {
     }
     health_=std::max(0.0F,health_-applied);
     hurtResistantTime_=20;
-    if (health_<=0.0F) { health_=0.0F; dead_=true; velocity_={0.0}; flying_=false; }
+    if (health_<=0.0F) { health_=0.0F; dead_=true; velocity_=glm::dvec3(0.0); flying_=false; }
     return true;
 }
 
@@ -314,7 +314,7 @@ void Player::restoreSurvival(float health, int air, int fireTicks, bool dead) {
 }
 
 void Player::respawn() {
-    position_=respawnPosition_; previousPosition_=position_; velocity_={0.0}; health_=20.0F; air_=300; fireTicks_=0;
+    position_=respawnPosition_; previousPosition_=position_; velocity_=glm::dvec3(0.0); health_=20.0F; air_=300; fireTicks_=0;
     hurtResistantTime_=0; fireDamageTicker_=0; fallDistance_=0.0F; dead_=false; onGround_=false; flying_=false;
 }
 
