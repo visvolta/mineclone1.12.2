@@ -41,8 +41,18 @@ if not exist "%CTEST_EXE%" (
 echo Using CMake: %CMAKE_EXE%
 echo Using build directory: %CD%\build
 echo.
-"%CMAKE_EXE%" -S . -B build -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTING=ON -DBLOCKCRAFT_REQUIRE_MINECRAFT_ASSETS=ON
-if errorlevel 1 goto :failed
+rem CMake 4.x no longer supports some policy levels used by older third-party
+rem projects. The project handles GLM as header-only, and this cache setting keeps
+rem any remaining legacy FetchContent projects on a safe modern policy floor.
+"%CMAKE_EXE%" -S . -B build -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTING=ON -DBLOCKCRAFT_REQUIRE_MINECRAFT_ASSETS=ON -DCMAKE_POLICY_VERSION_MINIMUM=3.10
+if errorlevel 1 (
+    echo.
+    echo Initial configure failed. Clearing stale FetchContent sub-build state and retrying once...
+    if exist "build\_deps\glm-subbuild" rmdir /s /q "build\_deps\glm-subbuild"
+    if exist "build\_deps\glm-build" rmdir /s /q "build\_deps\glm-build"
+    "%CMAKE_EXE%" -S . -B build -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTING=ON -DBLOCKCRAFT_REQUIRE_MINECRAFT_ASSETS=ON -DCMAKE_POLICY_VERSION_MINIMUM=3.10
+    if errorlevel 1 goto :failed
+)
 "%CMAKE_EXE%" --build build --config Release --target blockcraft blockcraft_tests blockcraft_registry_tests blockcraft_foundation_tests blockcraft_rendering_parity_tests blockcraft_item_inventory_tests blockcraft_placement_rules_tests blockcraft_block_entity_tests blockcraft_save_format_tests blockcraft_survival_tests --parallel --clean-first
 if errorlevel 1 goto :failed
 "%CTEST_EXE%" --test-dir build -C Release --output-on-failure

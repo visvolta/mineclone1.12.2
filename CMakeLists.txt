@@ -18,9 +18,20 @@ if(MSVC)
     string(REPLACE "/RTC1" "" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
 endif()
 
-# glm is the only fetched dependency required by the asset-free foundation tests.
-FetchContent_Declare(glm GIT_REPOSITORY https://github.com/g-truc/glm.git GIT_TAG 1.0.1 GIT_SHALLOW TRUE)
+# GLM is header-only. Populate the exact 1.0.1 source archive, but deliberately
+# do not execute GLM's legacy CMakeLists.txt. This avoids third-party policy
+# compatibility failures/warnings under CMake 4.x while keeping the dependency
+# pinned to the exact upstream 1.0.1 commit.
+FetchContent_Declare(
+    glm
+    URL https://github.com/g-truc/glm/archive/0af55ccecd98d4e5a8d1fad7de25ba429d60e863.tar.gz
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    SOURCE_SUBDIR __blockcraft_header_only_no_cmake
+)
 FetchContent_MakeAvailable(glm)
+add_library(blockcraft_glm INTERFACE)
+target_include_directories(blockcraft_glm SYSTEM INTERFACE "${glm_SOURCE_DIR}")
+add_library(glm::glm ALIAS blockcraft_glm)
 
 set(BLOCKCRAFT_FOUNDATION_SOURCES
     src/blocks/BlockRegistry.cpp
