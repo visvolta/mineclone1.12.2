@@ -107,7 +107,8 @@ const TemperatureNoise& temperatureNoise() {
 
 Environment::Environment(const WorldConfig& config)
     : config_(config), random_(config.seed ^ 0x5DEECE66DLL),
-      worldTime_(static_cast<double>(config.initialWorldTime)),
+      totalWorldTime_(static_cast<double>(config.initialWorldTime)),
+      dayTime_(static_cast<double>(config.initialWorldTime)),
       ticksPerGameTick_(1200.0 / config.dayCycleSeconds),
       rainTime_(random_.nextInt(168000) + 12000),
       thunderTime_(random_.nextInt(168000) + 12000) {}
@@ -179,7 +180,8 @@ void Environment::updateLightning(const World& world) {
 
 void Environment::tick(const World& world) {
     ++rendererTicks_;
-    if (config_.daylightCycle) worldTime_ += ticksPerGameTick_;
+    totalWorldTime_ += 1.0;
+    if (config_.daylightCycle) dayTime_ += ticksPerGameTick_;
     updateWeather();
     updateLightning(world);
 }
@@ -207,7 +209,7 @@ PrecipitationType Environment::precipitationAt(const World& world, int x, int y,
 EnvironmentFrame Environment::sample(const World& world, const glm::vec3& cameraPosition,
                                      const glm::vec3& lookDirection, float partialTick) const {
     EnvironmentFrame result;
-    result.worldTime = worldTime_ + (config_.daylightCycle ? ticksPerGameTick_ * partialTick : 0.0);
+    result.worldTime = dayTime_ + (config_.daylightCycle ? ticksPerGameTick_ * partialTick : 0.0);
     result.celestialAngle = celestialAngle(result.worldTime);
     const std::int64_t day = static_cast<std::int64_t>(std::floor(result.worldTime / 24000.0));
     result.moonPhase = static_cast<int>((day % 8 + 8) % 8);

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(Blockcraft VERSION 0.17.0 LANGUAGES C CXX)
+project(Blockcraft VERSION 0.17.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -56,6 +56,17 @@ add_library(blockcraft_glm INTERFACE)
 target_include_directories(blockcraft_glm SYSTEM INTERFACE "${glm_SOURCE_DIR}")
 add_library(glm::glm ALIAS blockcraft_glm)
 
+# Persistence and dynamic-world tests are asset-free but require zlib for NBT.
+# Fetch it before the Minecraft-asset gate so CI can exercise these systems.
+FetchContent_Declare(
+    zlib
+    GIT_REPOSITORY https://github.com/madler/zlib.git
+    GIT_TAG v1.3.1
+    GIT_SHALLOW TRUE
+)
+set(ZLIB_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(zlib)
+
 set(BLOCKCRAFT_FOUNDATION_SOURCES
     src/blocks/BlockRegistry.cpp
     src/blocks/BlockShape.cpp
@@ -89,16 +100,69 @@ if(BUILD_TESTING)
     )
     target_include_directories(blockcraft_foundation_tests PRIVATE src)
     target_link_libraries(blockcraft_foundation_tests PRIVATE glm::glm Threads::Threads)
-    if(MSVC)
-        target_compile_options(blockcraft_foundation_tests PRIVATE /W4 /permissive- /UNDEBUG)
-    else()
-        target_compile_options(blockcraft_foundation_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
-    endif()
+
+    add_executable(blockcraft_persistence_tests
+        tests/PersistenceTests.cpp
+        src/save/Nbt.cpp
+        src/save/SaveMigration.cpp
+        src/save/RegionFile.cpp
+        src/world/Chunk.cpp
+    )
+    target_include_directories(blockcraft_persistence_tests PRIVATE src)
+    target_link_libraries(blockcraft_persistence_tests PRIVATE zlibstatic)
+
+    add_executable(blockcraft_dynamic_world_tests
+        tests/DynamicWorldTests.cpp
+        src/blocks/BlockRegistry.cpp
+        src/world/Chunk.cpp
+        src/world/World.cpp
+        src/world/DynamicBlockSystem.cpp
+        src/save/Nbt.cpp
+    )
+    target_include_directories(blockcraft_dynamic_world_tests PRIVATE src)
+    target_link_libraries(blockcraft_dynamic_world_tests PRIVATE glm::glm zlibstatic)
+
+    add_executable(blockcraft_functional_block_entity_tests
+        tests/FunctionalBlockEntityTests.cpp
+        src/blocks/BlockRegistry.cpp
+        src/blocks/BlockShape.cpp
+        src/core/Json.cpp
+        src/items/ItemRegistry.cpp
+        src/player/Player.cpp
+        src/player/PlayerInventory.cpp
+        src/survival/MiningRules.cpp
+        src/survival/FurnaceRules.cpp
+        src/survival/FoodStats.cpp
+        src/world/Chunk.cpp
+        src/world/World.cpp
+        src/world/Raycast.cpp
+        src/world/BlockEntitySystem.cpp
+        src/world/BlockEntityLogic.cpp
+        src/save/Nbt.cpp
+    )
+    target_include_directories(blockcraft_functional_block_entity_tests PRIVATE src)
+    target_link_libraries(blockcraft_functional_block_entity_tests PRIVATE glm::glm zlibstatic)
+
+    foreach(blockcraft_test_target IN ITEMS
+        blockcraft_foundation_tests
+        blockcraft_persistence_tests
+        blockcraft_dynamic_world_tests
+        blockcraft_functional_block_entity_tests)
+        if(MSVC)
+            target_compile_options(${blockcraft_test_target} PRIVATE /W4 /permissive- /UNDEBUG)
+        else()
+            target_compile_options(${blockcraft_test_target} PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
+        endif()
+    endforeach()
+
     add_test(NAME blockcraft_player_survival COMMAND blockcraft_foundation_tests)
+    add_test(NAME blockcraft_persistence COMMAND blockcraft_persistence_tests)
+    add_test(NAME blockcraft_dynamic_world COMMAND blockcraft_dynamic_world_tests)
+    add_test(NAME blockcraft_functional_block_entities COMMAND blockcraft_functional_block_entity_tests)
 endif()
 
 if(NOT BLOCKCRAFT_REQUIRE_MINECRAFT_ASSETS)
-    message(STATUS "Minecraft assets disabled: building asset-free registry/foundation tests only.")
+    message(STATUS "Minecraft assets disabled: building four asset-free regression suites.")
     return()
 endif()
 
@@ -119,12 +183,6 @@ FetchContent_Declare(
     GIT_REPOSITORY https://github.com/nothings/stb.git
     GIT_TAG f58f558c120e9b32c217290b80bad1a0729fbb2c
 )
-FetchContent_Declare(
-    zlib
-    GIT_REPOSITORY https://github.com/madler/zlib.git
-    GIT_TAG v1.3.1
-    GIT_SHALLOW TRUE
-)
 # Pin ImGui to a known backend/API revision; never build imgui_demo.cpp into the game.
 FetchContent_Declare(
     imgui
@@ -133,8 +191,7 @@ FetchContent_Declare(
     GIT_SHALLOW TRUE
 )
 
-set(ZLIB_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(glfw glad stb zlib imgui)
+FetchContent_MakeAvailable(glfw glad stb imgui)
 glad_add_library(glad_gl_core_33 STATIC REPRODUCIBLE API gl:core=3.3)
 
 add_library(imgui_backend STATIC
@@ -266,9 +323,11 @@ set(BLOCKCRAFT_CORE_SOURCES
     src/world/Chunk.cpp
     src/world/World.cpp
     src/world/BlockEntitySystem.cpp
+    src/world/BlockEntityLogic.cpp
     src/world/DynamicBlockSystem.cpp
     src/world/ItemEntitySystem.cpp
     src/save/Nbt.cpp
+    src/save/SaveMigration.cpp
     src/save/RegionFile.cpp
     src/save/WorldSave.cpp
     src/rendering/ChunkMesher.cpp
@@ -343,21 +402,6 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME blockcraft_gameplay_parity COMMAND blockcraft_gameplay_tests)
 
-    add_executable(blockcraft_persistence_tests
-        tests/PersistenceTests.cpp
-        src/save/Nbt.cpp
-        src/save/RegionFile.cpp
-        src/world/Chunk.cpp
-    )
-    target_include_directories(blockcraft_persistence_tests PRIVATE src)
-    target_link_libraries(blockcraft_persistence_tests PRIVATE zlibstatic)
-    if(MSVC)
-        target_compile_options(blockcraft_persistence_tests PRIVATE /W4 /permissive- /UNDEBUG)
-    else()
-        target_compile_options(blockcraft_persistence_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
-    endif()
-    add_test(NAME blockcraft_persistence COMMAND blockcraft_persistence_tests)
-
     add_executable(blockcraft_rendering_model_tests
         tests/RenderingModelTests.cpp
         src/blocks/BlockRegistry.cpp
@@ -377,47 +421,6 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME blockcraft_rendering_models COMMAND blockcraft_rendering_model_tests)
 
-    add_executable(blockcraft_dynamic_world_tests
-        tests/DynamicWorldTests.cpp
-        src/blocks/BlockRegistry.cpp
-        src/world/Chunk.cpp
-        src/world/World.cpp
-        src/world/DynamicBlockSystem.cpp
-    )
-    target_include_directories(blockcraft_dynamic_world_tests PRIVATE src)
-    target_link_libraries(blockcraft_dynamic_world_tests PRIVATE glm::glm)
-    if(MSVC)
-        target_compile_options(blockcraft_dynamic_world_tests PRIVATE /W4 /permissive- /UNDEBUG)
-    else()
-        target_compile_options(blockcraft_dynamic_world_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
-    endif()
-    add_test(NAME blockcraft_dynamic_world COMMAND blockcraft_dynamic_world_tests)
-
-    add_executable(blockcraft_functional_block_entity_tests
-        tests/FunctionalBlockEntityTests.cpp
-        src/blocks/BlockRegistry.cpp
-        src/blocks/BlockShape.cpp
-        src/core/Json.cpp
-        src/items/ItemRegistry.cpp
-        src/player/Player.cpp
-        src/player/PlayerInventory.cpp
-        src/survival/MiningRules.cpp
-        src/survival/FurnaceRules.cpp
-        src/survival/FoodStats.cpp
-        src/world/Chunk.cpp
-        src/world/World.cpp
-        src/world/Raycast.cpp
-        src/world/BlockEntitySystem.cpp
-        src/save/Nbt.cpp
-    )
-    target_include_directories(blockcraft_functional_block_entity_tests PRIVATE src)
-    target_link_libraries(blockcraft_functional_block_entity_tests PRIVATE glm::glm zlibstatic)
-    if(MSVC)
-        target_compile_options(blockcraft_functional_block_entity_tests PRIVATE /W4 /permissive- /UNDEBUG)
-    else()
-        target_compile_options(blockcraft_functional_block_entity_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
-    endif()
-    add_test(NAME blockcraft_functional_block_entities COMMAND blockcraft_functional_block_entity_tests)
 endif()
 
 set_property(DIRECTORY PROPERTY VS_STARTUP_PROJECT blockcraft)

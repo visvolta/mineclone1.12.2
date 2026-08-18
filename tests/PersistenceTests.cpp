@@ -6,6 +6,7 @@
 
 #include "save/Nbt.hpp"
 #include "save/RegionFile.hpp"
+#include "save/SaveMigration.hpp"
 #include "world/Chunk.hpp"
 
 namespace {
@@ -72,6 +73,23 @@ void testRegionFile(const std::filesystem::path& root) {
     assert(region.readChunk(30, 1).value() == second);
 }
 
+
+void testSaveMigration() {
+    nbt::Compound legacy;
+    legacy["Time"] = nbt::Tag(std::int64_t{12345});
+    SaveMigration::migrateLevelData(legacy);
+    assert(nbt::integer(legacy, "BlockcraftSaveVersion", 0) == SaveMigration::currentVersion);
+    assert(nbt::integer(legacy, "DayTime", -1) == 12345);
+
+    nbt::Compound split;
+    split["Time"] = nbt::Tag(std::int64_t{50000});
+    split["DayTime"] = nbt::Tag(std::int64_t{6000});
+    split["BlockcraftSaveVersion"] = nbt::Tag(std::int32_t{1});
+    SaveMigration::migrateLevelData(split);
+    assert(nbt::integer(split, "Time", -1) == 50000);
+    assert(nbt::integer(split, "DayTime", -1) == 6000);
+}
+
 void testChunkStorage() {
     Chunk chunk(-3, 7);
     assert(chunk.set(2, 65, 9, makeBlockState(44, 3)));
@@ -119,6 +137,7 @@ int main() {
     testNbtRoundTrip();
     testGzipFile(root);
     testRegionFile(root);
+    testSaveMigration();
     testChunkStorage();
 
     std::filesystem::remove_all(root, error);

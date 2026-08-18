@@ -3,8 +3,12 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <optional>
+#include <string>
+#include <string_view>
 
 #include "blocks/BlockRegistry.hpp"
+#include "save/Nbt.hpp"
 #include "world/Chunk.hpp"
 #include "world/World.hpp"
 
@@ -22,6 +26,34 @@ bool isAir(BlockState s){ return blockId(s)==0; }
 bool isWater(BlockId id){ return id==BlockId::Water || id==BlockId::FlowingWater; }
 bool isLava(BlockId id){ return id==BlockId::Lava || id==BlockId::FlowingLava; }
 bool solidTop(BlockState s){ if(isAir(s)) return false; const auto& d=BlockRegistry::get(s); return d.fullCube; }
+
+bool managedScheduledBlock(BlockId id) {
+    return id == BlockId::FlowingWater || id == BlockId::Water ||
+           id == BlockId::FlowingLava || id == BlockId::Lava ||
+           id == BlockId::Sand || id == BlockId::Gravel ||
+           id == BlockId::ConcretePowder || id == BlockId::Fire || id == BlockId::TNT;
+}
+
+std::optional<std::uint16_t> blockIdFromName(std::string_view resourceName) {
+    if (resourceName.rfind("minecraft:", 0) == 0) resourceName.remove_prefix(10);
+    for (std::uint16_t id = 0; id <= 255; ++id) {
+        if (BlockRegistry::legacyName(id) == resourceName) return id;
+    }
+    return std::nullopt;
+}
+
+std::optional<std::uint16_t> scheduledTickBlockId(const nbt::Compound& compound) {
+    const nbt::Tag* id = nbt::find(compound, "i");
+    if (id == nullptr) return std::nullopt;
+    if (id->type == nbt::Type::String) return blockIdFromName(std::get<std::string>(id->value));
+    const std::int64_t numeric = nbt::integer(compound, "i", -1);
+    if (numeric < 0 || numeric > 65535) return std::nullopt;
+    return static_cast<std::uint16_t>(numeric);
+}
+
+bool tickBelongsToChunk(const glm::ivec3& position, const Chunk& chunk) {
+    return World::floorDiv16(position.x) == chunk.x() && World::floorDiv16(position.z) == chunk.z();
+}
 }
 
 DynamicBlockSystem::DynamicBlockSystem(std::uint64_t seed)
@@ -45,6 +77,30 @@ bool DynamicBlockSystem::set(World& world, const glm::ivec3& p, BlockState state
 void DynamicBlockSystem::scanChunk(World& world, int chunkX, int chunkZ) {
     const Chunk* chunk = world.findChunk(chunkX, chunkZ);
     if (chunk == nullptr) return;
+
+    // Import vanilla TileTicks before scheduling default neighbour updates so
+    // the persisted remaining delay wins the de-duplication race.
+    for (const std::vector<std::uint8_t>& encoded : chunk->scheduledTicks()) {
+        try {
+            const nbt::Document document = nbt::decode(encoded);
+            if (document.root.type != nbt::Type::Compound) continue;
+            const nbt::Compound& tick = document.root.compound();
+            const auto id = scheduledTickBlockId(tick);
+            if (!id || !managedScheduledBlock(static_cast<BlockId>(*id))) continue;
+            const glm::ivec3 position{
+                static_cast<int>(nbt::integer(tick, "x", 0)),
+                static_cast<int>(nbt::integer(tick, "y", 0)),
+                static_cast<int>(nbt::integer(tick, "z", 0))};
+            if (!tickBelongsToChunk(position, *chunk)) continue;
+            const BlockState current = world.getBlock(position.x, position.y, position.z);
+            if (blockId(current) != *id) continue;
+            schedule(position, current, static_cast<int>(nbt::integer(tick, "t", 1)),
+                     static_cast<int>(nbt::integer(tick, "p", 0)));
+        } catch (...) {
+            // Keep malformed/unknown entries in Chunk::scheduledTicks so the
+            // persistence layer can round-trip them without data loss.
+        }
+    }
     for (int y = 0; y < chunkHeight; ++y) for (int z = 0; z < 16; ++z) for (int x = 0; x < 16; ++x) {
         const BlockState state = chunk->get(x,y,z);
         const BlockId id = static_cast<BlockId>(blockId(state));
@@ -158,10 +214,99 @@ void DynamicBlockSystem::randomTick(World& world,const glm::ivec3& p,BlockState 
     else if(id==BlockId::Fire)schedule(p,state,30);
 }
 
-std::vector<glm::ivec3> DynamicBlockSystem::tick(World& world){
-    ++gameTime_;std::vector<glm::ivec3> changed;std::size_t scheduledBudget=1024;
-    while(scheduledBudget--&& !scheduled_.empty()&&scheduled_.top().due<=gameTime_){ScheduledTick t=scheduled_.top();scheduled_.pop();scheduledKeys_.erase(posKey(t.position)^(static_cast<std::uint64_t>(blockId(t.expectedState))<<1U));scheduledTick(world,t,changed);}
-    // A bounded random-tick pass keeps large view distances from creating a CPU spike.
-    std::size_t chunkBudget=128;for(const auto& [unused,chunk]:world.chunks()){(void)unused;if(!chunk||chunkBudget--==0)break;for(int i=0;i<12;++i){int x=static_cast<int>(random_()%16),z=static_cast<int>(random_()%16),y=static_cast<int>(random_()%chunkHeight);glm::ivec3 p{chunk->x()*16+x,y,chunk->z()*16+z};BlockState s=chunk->get(x,y,z);if(blockId(s)!=0)randomTick(world,p,s,changed);}}
+std::vector<glm::ivec3> DynamicBlockSystem::tickScheduled(World& world) {
+    ++gameTime_;
+    std::vector<glm::ivec3> changed;
+    std::size_t budget = 1024;
+    while (budget-- && !scheduled_.empty() && scheduled_.top().due <= gameTime_) {
+        ScheduledTick tick = scheduled_.top();
+        scheduled_.pop();
+
+        // Vanilla only processes scheduled updates for loaded chunks. Keep the
+        // update alive and revisit it later rather than silently consuming it.
+        if (world.findChunk(World::floorDiv16(tick.position.x), World::floorDiv16(tick.position.z)) == nullptr) {
+            tick.due = gameTime_ + 20;
+            tick.sequence = sequence_++;
+            scheduled_.push(tick);
+            continue;
+        }
+
+        scheduledKeys_.erase(posKey(tick.position) ^
+            (static_cast<std::uint64_t>(blockId(tick.expectedState)) << 1U));
+        scheduledTick(world, tick, changed);
+    }
     return changed;
 }
+
+std::vector<glm::ivec3> DynamicBlockSystem::tickRandom(World& world) {
+    std::vector<glm::ivec3> changed;
+    // A bounded random-tick pass keeps large view distances from creating a CPU spike.
+    std::size_t chunkBudget = 128;
+    for (const auto& [unused, chunk] : world.chunks()) {
+        (void)unused;
+        if (!chunk || chunkBudget-- == 0) break;
+        for (int i = 0; i < 12; ++i) {
+            const int x = static_cast<int>(random_() % 16);
+            const int z = static_cast<int>(random_() % 16);
+            const int y = static_cast<int>(random_() % chunkHeight);
+            const glm::ivec3 position{chunk->x() * 16 + x, y, chunk->z() * 16 + z};
+            const BlockState state = chunk->get(x, y, z);
+            if (blockId(state) != 0) randomTick(world, position, state, changed);
+        }
+    }
+    return changed;
+}
+
+std::vector<glm::ivec3> DynamicBlockSystem::tick(World& world) {
+    std::vector<glm::ivec3> changed = tickScheduled(world);
+    std::vector<glm::ivec3> randomChanges = tickRandom(world);
+    changed.insert(changed.end(), randomChanges.begin(), randomChanges.end());
+    return changed;
+}
+
+void DynamicBlockSystem::syncChunkScheduledTicks(Chunk& chunk) const {
+    std::vector<std::vector<std::uint8_t>> encodedTicks;
+
+    // Preserve vanilla/foreign updates this runtime does not own.
+    for (const std::vector<std::uint8_t>& encoded : chunk.scheduledTicks()) {
+        bool preserve = true;
+        try {
+            const nbt::Document document = nbt::decode(encoded);
+            if (document.root.type == nbt::Type::Compound) {
+                const auto id = scheduledTickBlockId(document.root.compound());
+                if (id && managedScheduledBlock(static_cast<BlockId>(*id))) preserve = false;
+            }
+        } catch (...) {
+        }
+        if (preserve) encodedTicks.push_back(encoded);
+    }
+
+    auto pending = scheduled_;
+    while (!pending.empty()) {
+        const ScheduledTick tick = pending.top();
+        pending.pop();
+        if (!tickBelongsToChunk(tick.position, chunk)) continue;
+
+        nbt::Compound compound;
+        compound["i"] = nbt::Tag(static_cast<std::int32_t>(blockId(tick.expectedState)));
+        compound["x"] = nbt::Tag(static_cast<std::int32_t>(tick.position.x));
+        compound["y"] = nbt::Tag(static_cast<std::int32_t>(tick.position.y));
+        compound["z"] = nbt::Tag(static_cast<std::int32_t>(tick.position.z));
+        const std::uint64_t remaining = tick.due > gameTime_ ? tick.due - gameTime_ : 0;
+        compound["t"] = nbt::Tag(static_cast<std::int32_t>(std::min<std::uint64_t>(remaining, 0x7FFFFFFFULL)));
+        compound["p"] = nbt::Tag(static_cast<std::int32_t>(tick.priority));
+        nbt::Document document;
+        document.root = nbt::Tag(std::move(compound));
+        encodedTicks.push_back(nbt::encode(document));
+    }
+
+    chunk.replaceScheduledTicks(std::move(encodedTicks));
+}
+
+void DynamicBlockSystem::syncLoadedChunkScheduledTicks(World& world) const {
+    for (const auto& [unused, chunk] : world.chunks()) {
+        (void)unused;
+        if (chunk) syncChunkScheduledTicks(*chunk);
+    }
+}
+

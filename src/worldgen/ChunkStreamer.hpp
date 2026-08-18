@@ -13,6 +13,7 @@
 
 class BlockEntitySystem;
 class Chunk;
+class DynamicBlockSystem;
 class World;
 class WorldSave;
 
@@ -22,7 +23,8 @@ struct ChunkStreamChanges { std::vector<ChunkCoordinate> loaded; std::vector<Chu
 class ChunkStreamer {
 public:
     ChunkStreamer(World& world, const WorldConfig& config, int viewDistance,
-                  WorldSave* save = nullptr, BlockEntitySystem* blockEntities = nullptr);
+                  WorldSave* save = nullptr, BlockEntitySystem* blockEntities = nullptr,
+                  DynamicBlockSystem* dynamicBlocks = nullptr);
     ~ChunkStreamer();
     ChunkStreamer(const ChunkStreamer&) = delete;
     ChunkStreamer& operator=(const ChunkStreamer&) = delete;
@@ -55,6 +57,7 @@ private:
     std::uint64_t useCounter_ = 0;
     WorldSave* save_ = nullptr;
     BlockEntitySystem* blockEntities_ = nullptr;
+    DynamicBlockSystem* dynamicBlocks_ = nullptr;
     std::shared_ptr<int> generatorIdentity_;
     std::shared_ptr<CompletionQueue> completions_;
     ThreadPool workers_;

@@ -1,0 +1,17 @@
+name: Windows asset-free CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  foundation:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure asset-free tests
+        run: cmake -S . -B build -A x64 -DBUILD_TESTING=ON -DBLOCKCRAFT_REQUIRE_MINECRAFT_ASSETS=OFF -DCMAKE_POLICY_VERSION_MINIMUM=3.10
+      - name: Build
+        run: cmake --build build --config Release --parallel
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure

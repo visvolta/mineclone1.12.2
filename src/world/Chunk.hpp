@@ -88,10 +88,11 @@ public:
     void addBlockEntity(GeneratedBlockEntity entity) { blockEntities_.push_back(std::move(entity)); }
     [[nodiscard]] const std::vector<GeneratedBlockEntity>& blockEntities() const { return blockEntities_; }
 
-    // Stage 8 preserves vanilla TileTicks even before the runtime scheduled-tick
-    // engine is implemented. Each entry is a complete uncompressed compound NBT
-    // document, so loading/saving a 1.12.2 world is lossless for this field.
+    // Vanilla TileTicks are retained as complete uncompressed compound NBT documents.
+    // DynamicBlockSystem imports the tick types it owns and rewrites their remaining
+    // delays before chunk saves; unsupported entries are preserved byte-for-byte.
     void addScheduledTick(std::vector<std::uint8_t> tickNbt) { scheduledTicks_.push_back(std::move(tickNbt)); }
+    void replaceScheduledTicks(std::vector<std::vector<std::uint8_t>> ticks) { scheduledTicks_ = std::move(ticks); }
     [[nodiscard]] const std::vector<std::vector<std::uint8_t>>& scheduledTicks() const { return scheduledTicks_; }
 
     void setSaveMetadata(std::int64_t lastUpdate, std::int64_t inhabitedTime,

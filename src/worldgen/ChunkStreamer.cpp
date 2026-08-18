@@ -13,6 +13,7 @@
 
 #include "save/WorldSave.hpp"
 #include "world/BlockEntitySystem.hpp"
+#include "world/DynamicBlockSystem.hpp"
 #include "world/World.hpp"
 #include "worldgen/FlatGeneratorSettings.hpp"
 #include "worldgen/StructureGenerator.hpp"
@@ -91,10 +92,12 @@ std::uint64_t ChunkStreamer::key(int chunkX, int chunkZ) {
 }
 
 ChunkStreamer::ChunkStreamer(World& world, const WorldConfig& config, int viewDistance,
-                             WorldSave* save, BlockEntitySystem* blockEntities)
+                             WorldSave* save, BlockEntitySystem* blockEntities,
+                             DynamicBlockSystem* dynamicBlocks)
     : world_(world), config_(config), viewDistance_(viewDistance),
       cacheCapacity_(static_cast<std::size_t>(config.chunkCacheCapacity)),
-      save_(save), blockEntities_(blockEntities), generatorIdentity_(std::make_shared<int>(0)),
+      save_(save), blockEntities_(blockEntities), dynamicBlocks_(dynamicBlocks),
+      generatorIdentity_(std::make_shared<int>(0)),
       completions_(std::make_shared<CompletionQueue>()),
       workers_(ThreadPool::recommendedWorkerCount()) {}
 
@@ -215,6 +218,7 @@ bool ChunkStreamer::schedule(int chunkX, int chunkZ, int priority) {
 
 void ChunkStreamer::cacheChunk(std::unique_ptr<Chunk> chunk) {
     if (!chunk) return;
+    if (dynamicBlocks_ != nullptr) dynamicBlocks_->syncChunkScheduledTicks(*chunk);
     const std::uint64_t chunkKey = key(chunk->x(), chunk->z());
     // Do not perform zlib/region-file writes on the render thread merely
     // because a chunk crossed the view-distance boundary. Stage 8 originally
@@ -235,6 +239,7 @@ void ChunkStreamer::trimCache() {
         if (oldest == cache_.end()) return;
         if (save_ != nullptr && blockEntities_ != nullptr && oldest->second.chunk) {
             try {
+                if (dynamicBlocks_ != nullptr) dynamicBlocks_->syncChunkScheduledTicks(*oldest->second.chunk);
                 save_->saveChunk(*oldest->second.chunk, *blockEntities_);
                 diskChecked_.erase(oldest->first);
             } catch (...) {
@@ -248,6 +253,7 @@ void ChunkStreamer::flushCache() {
     if (save_ == nullptr || blockEntities_ == nullptr) return;
     for (auto& [chunkKey, entry] : cache_) {
         if (!entry.chunk) continue;
+        if (dynamicBlocks_ != nullptr) dynamicBlocks_->syncChunkScheduledTicks(*entry.chunk);
         save_->saveChunk(*entry.chunk, *blockEntities_);
         diskChecked_.erase(chunkKey);
     }

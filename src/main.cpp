@@ -228,7 +228,7 @@ int main() {
 
         frontEnd->showLoading("Loading world", "Loading biome colours", 22);
         BiomeColors::load(BLOCKCRAFT_ASSET_ROOT);
-        ChunkStreamer chunkStreamer(world, config, config.viewDistance, &worldSave, &blockEntities);
+        ChunkStreamer chunkStreamer(world, config, config.viewDistance, &worldSave, &blockEntities, &dynamicBlocks);
         frontEnd->showLoading("Loading world", "Building terrain", 25);
         chunkStreamer.prime(loadedPlayer.position.x, loadedPlayer.position.z, 1,
             [&](float progress) {
@@ -407,23 +407,29 @@ int main() {
                                 // In a single-player world with no hostile-entity system yet,
                                 // EntityPlayer#trySleep's only meaningful Stage 7 gate is night.
                                 // Advance to the next vanilla day boundary when sleeping at night.
-                                const double dayTime = std::fmod(environment.worldTime(), 24000.0);
+                                const double dayTime = std::fmod(environment.dayTime(), 24000.0);
                                 if (dayTime >= 12541.0 && dayTime < 23460.0) {
-                                    const double nextDay = (std::floor(environment.worldTime() / 24000.0) + 1.0) * 24000.0;
-                                    environment.setWorldTime(nextDay);
+                                    const double nextDay = (std::floor(environment.dayTime() / 24000.0) + 1.0) * 24000.0;
+                                    environment.setDayTime(nextDay);
                                 }
                             }
                         }
                     }
+                    // Stage 12.5 establishes one deterministic game-tick order:
+                    // scheduled blocks -> random blocks -> block entities -> entities -> environment.
+                    const auto applyDynamicChanges = [&](const std::vector<glm::ivec3>& changes) {
+                        for (const glm::ivec3& changed : changes) {
+                            blockEntities.rescanPosition(world, changed);
+                            const auto lightingChanges = lightingEngine.blockChangedSync(changed.x, changed.y, changed.z);
+                            worldRenderer.blockChangedSync(changed.x, changed.y, changed.z, lightingChanges);
+                        }
+                    };
+                    applyDynamicChanges(dynamicBlocks.tickScheduled(world));
+                    applyDynamicChanges(dynamicBlocks.tickRandom(world));
                     for (const glm::ivec3& changed : blockEntities.tick(world)) {
                         const auto lightingChanges = lightingEngine.blockChangedSync(changed.x, changed.y, changed.z);
                         worldRenderer.blockChangedSync(changed.x, changed.y, changed.z, lightingChanges);
                         dynamicBlocks.neighborChanged(world, changed);
-                    }
-                    for (const glm::ivec3& changed : dynamicBlocks.tick(world)) {
-                        blockEntities.rescanPosition(world, changed);
-                        const auto lightingChanges = lightingEngine.blockChangedSync(changed.x, changed.y, changed.z);
-                        worldRenderer.blockChangedSync(changed.x, changed.y, changed.z, lightingChanges);
                     }
                     itemEntities.tick(world, player);
                     environment.tick(world);
@@ -555,6 +561,7 @@ int main() {
             }
 
             if (currentTime - lastAutosave >= autosaveIntervalSeconds) {
+                dynamicBlocks.syncLoadedChunkScheduledTicks(world);
                 worldSave.saveAll(world, blockEntities, config, player, environment);
                 lastAutosave = currentTime;
             }
@@ -573,6 +580,7 @@ int main() {
         // Flush the streamer's LRU before saving the live chunks so both active
         // and recently visited terrain survive a clean process restart.
         chunkStreamer.flushCache();
+        dynamicBlocks.syncLoadedChunkScheduledTicks(world);
         worldSave.saveAll(world, blockEntities, config, player, environment);
         if (returnToTitle && glfwWindowShouldClose(window) == GLFW_FALSE) {
             setCursorCaptured(window, false);

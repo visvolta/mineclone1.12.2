@@ -47,17 +47,15 @@ goto configure
 
 :configured
 echo.
-echo Configuration succeeded. Building %CONFIG%...
-"%CMAKE_EXE%" --build "%BUILD_DIR%" --config %CONFIG% --clean-first --parallel --target ^
-    blockcraft ^
-    blockcraft_foundation_tests ^
-    blockcraft_gameplay_tests ^
-    blockcraft_persistence_tests ^
-    blockcraft_rendering_model_tests
+echo Configuration succeeded. Building all Release targets...
+rem Build the default ALL target instead of maintaining a hand-written target
+rem list. Every current and future test executable registered by CMake is then
+rem compiled before CTest runs.
+"%CMAKE_EXE%" --build "%BUILD_DIR%" --config %CONFIG% --clean-first --parallel
 if errorlevel 1 goto failed
 
 echo.
-echo Running tests...
+echo Running all registered tests...
 "%CTEST_EXE%" --test-dir "%BUILD_DIR%" -C %CONFIG% --output-on-failure
 if errorlevel 1 goto failed
 

@@ -12,6 +12,7 @@
 #include "environment/Environment.hpp"
 #include "items/ItemRegistry.hpp"
 #include "save/RegionFile.hpp"
+#include "save/SaveMigration.hpp"
 #include "world/BlockEntitySystem.hpp"
 #include "world/Chunk.hpp"
 #include "world/World.hpp"
@@ -151,24 +152,26 @@ std::filesystem::path WorldSave::regionPath(int chunkX, int chunkZ) const {
 
 WorldConfig WorldSave::loadConfig(const WorldConfig& defaults) const {
     WorldConfig config = defaults;
-    const nbt::Document document = nbt::readGzipFile(folder_ / "level.dat");
-    const nbt::Compound* data = dataCompound(document);
+    nbt::Document document = nbt::readGzipFile(folder_ / "level.dat");
+    nbt::Compound* data = dataCompound(document);
     if (data == nullptr) throw std::runtime_error("level.dat has no Data compound");
+    SaveMigration::migrateLevelData(*data);
 
     config.seed = nbt::integer(*data, "RandomSeed", config.seed);
     config.seedText = std::to_string(config.seed);
     config.worldType = parseGenerator(nbt::string(*data, "generatorName", "default"));
     config.generatorOptions = nbt::string(*data, "generatorOptions", "{}");
     config.generateStructures = nbt::boolean(*data, "MapFeatures", true);
-    config.initialWorldTime = nbt::integer(*data, "Time", 0);
+    config.initialWorldTime = nbt::integer(*data, "DayTime", nbt::integer(*data, "Time", 0));
     return config;
 }
 
 LoadedPlayerState WorldSave::loadPlayer(Player& player, BlockEntitySystem* blockEntities) const {
     LoadedPlayerState state;
-    const nbt::Document document = nbt::readGzipFile(folder_ / "level.dat");
-    const nbt::Compound* data = dataCompound(document);
+    nbt::Document document = nbt::readGzipFile(folder_ / "level.dat");
+    nbt::Compound* data = dataCompound(document);
     if (data == nullptr) return state;
+    SaveMigration::migrateLevelData(*data);
 
     state.gameMode = nbt::integer(*data, "GameType", 0) == 1 ? GameMode::Creative : GameMode::Survival;
     state.spawnPosition = {static_cast<double>(nbt::integer(*data,"SpawnX",0))+0.5, static_cast<double>(nbt::integer(*data,"SpawnY",80)), static_cast<double>(nbt::integer(*data,"SpawnZ",0))+0.5};
@@ -244,11 +247,13 @@ LoadedPlayerState WorldSave::loadPlayer(Player& player, BlockEntitySystem* block
 }
 
 void WorldSave::loadEnvironment(Environment& environment) const {
-    const nbt::Document document = nbt::readGzipFile(folder_ / "level.dat");
-    const nbt::Compound* data = dataCompound(document);
+    nbt::Document document = nbt::readGzipFile(folder_ / "level.dat");
+    nbt::Compound* data = dataCompound(document);
     if (data == nullptr) return;
+    SaveMigration::migrateLevelData(*data);
     EnvironmentSaveState state;
-    state.worldTime = static_cast<double>(nbt::integer(*data, "Time", 0));
+    state.totalWorldTime = static_cast<double>(nbt::integer(*data, "Time", 0));
+    state.dayTime = static_cast<double>(nbt::integer(*data, "DayTime", nbt::integer(*data, "Time", 0)));
     state.raining = nbt::boolean(*data, "raining", false);
     state.thundering = nbt::boolean(*data, "thundering", false);
     state.rainTime = static_cast<int>(nbt::integer(*data, "rainTime", 0));
@@ -336,6 +341,7 @@ void WorldSave::saveLevel(const WorldConfig& config, const Player& player,
 
     nbt::Compound data;
     data["DataVersion"] = nbt::Tag(dataVersion1122);
+    data["BlockcraftSaveVersion"] = nbt::Tag(SaveMigration::currentVersion);
     data["version"] = nbt::Tag(anvilVersion);
     data["LevelName"] = nbt::Tag(levelName);
     data["RandomSeed"] = nbt::Tag(config.seed);
@@ -353,8 +359,8 @@ void WorldSave::saveLevel(const WorldConfig& config, const Player& player,
     data["SpawnZ"] = nbt::Tag(spawnZ);
 
     const EnvironmentSaveState environmentState = environment.saveState();
-    data["Time"] = nbt::Tag(static_cast<std::int64_t>(environmentState.worldTime));
-    data["DayTime"] = nbt::Tag(static_cast<std::int64_t>(environmentState.worldTime));
+    data["Time"] = nbt::Tag(static_cast<std::int64_t>(environmentState.totalWorldTime));
+    data["DayTime"] = nbt::Tag(static_cast<std::int64_t>(environmentState.dayTime));
     data["raining"] = nbt::Tag(static_cast<std::int8_t>(environmentState.raining));
     data["rainTime"] = nbt::Tag(static_cast<std::int32_t>(environmentState.rainTime));
     data["thundering"] = nbt::Tag(static_cast<std::int8_t>(environmentState.thundering));
@@ -775,6 +781,7 @@ std::filesystem::path WorldSave::createWorld(const std::filesystem::path& savesR
 
     nbt::Compound data;
     data["DataVersion"] = nbt::Tag(dataVersion1122);
+    data["BlockcraftSaveVersion"] = nbt::Tag(SaveMigration::currentVersion);
     data["version"] = nbt::Tag(anvilVersion);
     data["LevelName"] = nbt::Tag(request.levelName.empty() ? std::string("New World") : request.levelName);
     data["RandomSeed"] = nbt::Tag(config.seed);

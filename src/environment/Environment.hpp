@@ -13,7 +13,8 @@ enum class PrecipitationType { None, Rain, Snow };
 enum class FogMode { Linear, Exponential };
 
 struct EnvironmentSaveState {
-    double worldTime = 0.0;
+    double totalWorldTime = 0.0;
+    double dayTime = 0.0;
     bool raining = false;
     bool thundering = false;
     int rainTime = 0;
@@ -56,15 +57,19 @@ public:
     [[nodiscard]] EnvironmentFrame sample(const World& world, const glm::vec3& cameraPosition,
                                           const glm::vec3& lookDirection, float partialTick) const;
     [[nodiscard]] PrecipitationType precipitationAt(const World& world, int x, int y, int z) const;
-    [[nodiscard]] double worldTime() const { return worldTime_; }
-    // Single-player bed completion uses the same 24000-tick world clock as
-    // Minecraft 1.12.2. Persistence of this value belongs to the save stage.
-    void setWorldTime(double value) { worldTime_ = value; }
+    // Vanilla keeps total world age (Time) separate from the daylight clock
+    // (DayTime). Sleeping and /time affect DayTime; the total age keeps moving.
+    [[nodiscard]] double totalWorldTime() const { return totalWorldTime_; }
+    [[nodiscard]] double dayTime() const { return dayTime_; }
+    [[nodiscard]] double worldTime() const { return dayTime_; } // compatibility alias
+    void setDayTime(double value) { dayTime_ = value; }
+    void setWorldTime(double value) { setDayTime(value); } // compatibility alias
     [[nodiscard]] EnvironmentSaveState saveState() const {
-        return {worldTime_, raining_, thundering_, rainTime_, thunderTime_, rainStrength_, thunderStrength_};
+        return {totalWorldTime_, dayTime_, raining_, thundering_, rainTime_, thunderTime_, rainStrength_, thunderStrength_};
     }
     void restoreSaveState(const EnvironmentSaveState& state) {
-        worldTime_ = state.worldTime;
+        totalWorldTime_ = state.totalWorldTime;
+        dayTime_ = state.dayTime;
         raining_ = state.raining;
         thundering_ = state.thundering;
 
@@ -95,7 +100,8 @@ private:
 
     const WorldConfig& config_;
     JavaRandom random_;
-    double worldTime_ = 0.0;
+    double totalWorldTime_ = 0.0;
+    double dayTime_ = 0.0;
     double ticksPerGameTick_ = 1.0;
     std::uint64_t rendererTicks_ = 0;
     bool raining_ = false;

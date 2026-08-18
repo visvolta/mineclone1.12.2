@@ -4,43 +4,82 @@ C++20/OpenGL recreation targeting Minecraft Java Edition 1.12.2 behavior.
 
 ## Windows build
 
-Requirements: Visual Studio 2022 C++ workload, CMake 3.24+, Git, and an OpenGL 3.3-capable driver.
+Requirements:
 
-Keep a legitimate `1.12.2.jar` in the project root, then run:
+- Visual Studio 2022 with the Desktop development with C++ workload
+- CMake 3.24+
+- Git
+- an OpenGL 3.3-capable driver
+- a legitimate Minecraft Java Edition `1.12.2.jar` in the project root
+
+Run:
 
 ```powershell
 .\build-release.bat
 ```
 
-The script uses only `build\`, performs a clean Release build, runs the core and registry tests, and produces:
+The release script configures with the `Visual Studio 17 2022` generator, keeps fetched open-source dependencies in `.deps\`, builds the complete CMake `ALL` target, then runs every registered CTest suite. New test executables therefore do not need to be added manually to the batch file.
+
+The executable is produced at:
 
 ```text
 build\Release\blockcraft.exe
 ```
 
-Manual equivalent:
+CMake extracts the required 1.12.2 resources from the local client JAR into the build directory. Minecraft assets are not stored in the repository.
+
+## Asset-free CI / foundation tests
+
+The project supports an asset-free configuration for CI and source-level foundation tests:
 
 ```powershell
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTING=ON
-cmake --build build --config Release --target blockcraft blockcraft_tests blockcraft_registry_tests --parallel --clean-first
-ctest --test-dir build -C Release --output-on-failure
-.\build\Release\blockcraft.exe
+cmake -S . -B build-ci -A x64 -DBUILD_TESTING=ON -DBLOCKCRAFT_REQUIRE_MINECRAFT_ASSETS=OFF
+cmake --build build-ci --config Release --parallel
+ctest --test-dir build-ci -C Release --output-on-failure
 ```
 
-CMake extracts the required 1.12.2 textures and structure templates from the local client JAR into the build directory; generated files are not stored in the source tree.
+`.github/workflows/windows-ci.yml` runs this path on Windows without requiring a Minecraft JAR.
+
+## Current test suites
+
+The full asset-backed build currently registers focused suites for:
+
+- player/survival foundation behavior
+- gameplay/crafting parity
+- persistence/NBT
+- rendering models
+- dynamic world ticking
+- functional block entities
 
 ## Source layout
 
-- `src/blocks` — block IDs, legacy state packing, registry/runtime block data
-- `src/core` — worker/thread infrastructure
-- `src/environment` — day/night, weather, fog state
+- `src/blocks` — legacy block IDs/states, shapes and placement rules
+- `src/client` — front end and scaled client UI infrastructure
+- `src/core` — JSON and worker/thread infrastructure
+- `src/crafting` — 1.12.2 JSON recipe loading and matching
+- `src/environment` — total world time, daylight time, weather and fog state
+- `src/items` — item registry and ItemStack data
 - `src/lighting` — skylight and block-light solving
-- `src/player` — player physics and block interaction
-- `src/rendering` — camera, shaders, meshing, textures, world/environment rendering
-- `src/world` — chunk/world storage and raycasting
-- `src/worldgen` — biome, terrain, caves, population, structures, streaming
-- `tests` — always-on core and 1.12.2 registry parity tests
+- `src/player` — player physics, survival state and block interaction
+- `src/rendering` — camera, models, meshing, HUD, environment and entity/block-entity rendering
+- `src/save` — NBT, Anvil region files, save migrations and world persistence
+- `src/survival` — mining, food and furnace rules
+- `src/world` — chunks, world storage, dynamic ticks, block entities, dropped items and raycasting
+- `src/worldgen` — biome, terrain, caves, population, structures and streaming
+- `tests` — focused deterministic regression suites
 
-## Controls
+## Stage 12.5 runtime ordering
 
-W/A/S/D move, Space jump, Left Ctrl sprint, Left Shift sneak/descend, mouse look, left/right mouse break/place, 1-9 or wheel select blocks, G toggles Survival/Creative, F3 toggles wireframe, Escape exits.
+A single simulation tick is intentionally ordered as:
+
+1. player/input
+2. block interaction
+3. scheduled block updates
+4. random block ticks
+5. block entities
+6. runtime entities
+7. environment/time/weather
+8. lighting propagation
+9. renderer updates
+
+This ordering is the baseline for the upcoming redstone stage.

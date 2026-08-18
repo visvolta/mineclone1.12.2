@@ -10,6 +10,7 @@
 
 #include "blocks/BlockState.hpp"
 
+class Chunk;
 class World;
 
 // Stage 11 runtime block ticking.  This intentionally mirrors the two vanilla
@@ -22,7 +23,18 @@ public:
     void schedule(const glm::ivec3& position, BlockState expectedState, int delayTicks, int priority = 0);
     void scanChunk(World& world, int chunkX, int chunkZ);
     void neighborChanged(World& world, const glm::ivec3& position);
-    [[nodiscard]] std::vector<glm::ivec3> tick(World& world);
+
+    // Explicit phase split used by the Stage 12.5 game-tick pipeline.
+    // tickScheduled advances gameTime exactly once; tickRandom does not.
+    [[nodiscard]] std::vector<glm::ivec3> tickScheduled(World& world);
+    [[nodiscard]] std::vector<glm::ivec3> tickRandom(World& world);
+    [[nodiscard]] std::vector<glm::ivec3> tick(World& world); // compatibility wrapper
+
+    // Vanilla-compatible TileTicks bridge. Runtime-managed ticks are imported
+    // from Chunk::scheduledTicks and written back before chunk persistence;
+    // unknown vanilla ticks are preserved byte-for-byte.
+    void syncChunkScheduledTicks(Chunk& chunk) const;
+    void syncLoadedChunkScheduledTicks(World& world) const;
     [[nodiscard]] std::uint64_t gameTime() const { return gameTime_; }
     [[nodiscard]] std::size_t pendingScheduledTicks() const { return scheduled_.size(); }
 
