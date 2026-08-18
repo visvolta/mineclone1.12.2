@@ -74,6 +74,7 @@ public:
     bool hurt(float amount, DamageType type = DamageType::Generic);
     void respawn();
     void setRespawnPosition(glm::dvec3 value) { respawnPosition_ = value; }
+    [[nodiscard]] const glm::dvec3& respawnPosition() const { return respawnPosition_; }
     void restoreSurvival(float health, int air, int fireTicks, bool dead = false,
                          int foodLevel = 20, float saturation = 5.0F, float exhaustion = 0.0F,
                          int experienceTotal = 0, int experienceLevel = 0, float experienceProgress = 0.0F);

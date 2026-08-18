@@ -306,6 +306,7 @@ int main() {
         double lastAutosave = previousTime;
         constexpr double autosaveIntervalSeconds = 30.0;
         bool returnToTitle = false;
+        bool worldMouseArmed = true;
 
         while (glfwWindowShouldClose(window) == GLFW_FALSE && !returnToTitle) {
             glfwPollEvents();
@@ -319,9 +320,11 @@ int main() {
                     for (ItemStack& dropped : gameHud.takeCraftingDrops())
                         itemEntities.spawn(dropped, player.feetPosition() + glm::dvec3(0.0, 0.5, 0.0));
                     setCursorCaptured(window, true);
+                    worldMouseArmed = false;
                 } else {
                     paused = !paused;
                     setCursorCaptured(window, !paused);
+                    if (!paused) worldMouseArmed = false;
                     accumulator = 0.0;
                     jumpPressPending = false;
                 }
@@ -346,6 +349,7 @@ int main() {
                     inventoryOpen = !inventoryOpen;
                 }
                 setCursorCaptured(window, !inventoryOpen);
+                if (!inventoryOpen) worldMouseArmed = false;
                 jumpPressPending = false;
             }
             eWasDown = eDown;
@@ -384,13 +388,18 @@ int main() {
                 jumpWasDown = jumpDown;
 
                 while (accumulator >= tickDuration) {
+                    const bool leftMouseDown = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+                    const bool rightMouseDown = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
+                    if (!inventoryOpen && !paused && !worldMouseArmed && !leftMouseDown && !rightMouseDown)
+                        worldMouseArmed = true;
+                    const bool allowWorldMouse = !inventoryOpen && worldMouseArmed;
                     PlayerInput tickInput = inventoryOpen ? PlayerInput{} : readPlayerInput(window, jumpPressPending);
-                    if (!inventoryOpen) tickInput.useItem = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
+                    if (allowWorldMouse) tickInput.useItem = rightMouseDown;
                     player.tick(world, tickInput, camera.front());
                     if (!inventoryOpen) {
                         interaction.tick(world, lightingEngine, worldRenderer, player, camera.front(),
-                                         glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS,
-                                         glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS);
+                                         allowWorldMouse && leftMouseDown,
+                                         allowWorldMouse && rightMouseDown);
                         if (const auto action = interaction.takeBlockEntityAction()) {
                             if (action->type == BlockEntityActionType::OpenChest ||
                                 action->type == BlockEntityActionType::OpenShulker ||
@@ -532,7 +541,7 @@ int main() {
             gameHud.beginFrame();
             gameHud.render(world, player, camera, config, chunkStreamer,
                            lightingEngine, worldRenderer, currentHit,
-                           framebufferWidth, framebufferHeight, displayedFps,
+                           framebufferWidth, framebufferHeight, displayedFps, environmentFrame.worldTime,
                            showDebug, paused, inventoryOpen);
             for (const ExperienceDrop& drop : gameHud.takeExperienceDrops())
                 if (drop.value > 0) itemEntities.spawnExperience(drop.position, drop.value);
@@ -540,10 +549,12 @@ int main() {
             if (gameHud.consumeScreenCloseRequest()) {
                 inventoryOpen = false;
                 setCursorCaptured(window, true);
+                worldMouseArmed = false;
             }
             if (gameHud.consumeResumeRequest()) {
                 paused = false;
                 setCursorCaptured(window, true);
+                worldMouseArmed = false;
                 accumulator = 0.0;
                 previousTime = glfwGetTime();
             }

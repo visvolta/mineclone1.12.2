@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cctype>
+#include <cstring>
+#include <cstdio>
 #include <iomanip>
 #include <limits>
 #include <sstream>
@@ -302,17 +305,54 @@ void GameHud::buildAsciiWidths(const std::vector<unsigned char>& pixels) {
 
 float GameHud::textWidth(std::string_view text) const {
     float width = 0.0F;
-    for (unsigned char character : text) width += static_cast<float>(charWidths_[character]);
+    bool bold = false;
+    for (std::size_t i = 0; i < text.size();) {
+        unsigned char character = static_cast<unsigned char>(text[i]);
+        char code = 0;
+        if (character == 0xC2 && i + 2 < text.size() &&
+            static_cast<unsigned char>(text[i + 1]) == 0xA7) {
+            code = static_cast<char>(std::tolower(static_cast<unsigned char>(text[i + 2])));
+            i += 3;
+        } else if (character == 0xA7 && i + 1 < text.size()) {
+            code = static_cast<char>(std::tolower(static_cast<unsigned char>(text[i + 1])));
+            i += 2;
+        }
+        if (code != 0) {
+            if (code == 'l') bold = true;
+            else if (code == 'r' || std::strchr("0123456789abcdef", code) != nullptr) bold = false;
+            continue;
+        }
+        ++i;
+        width += static_cast<float>(charWidths_[character]);
+        if (bold && character != ' ') width += 1.0F;
+    }
     return width;
 }
 
 void GameHud::drawText(float x, float y, std::string_view text, int scaleFactor,
                        bool rightAligned, unsigned int color) const {
+    static constexpr std::array<unsigned int, 16> vanillaColors = {
+        0xFF000000U, 0xFF0000AAU, 0xFF00AA00U, 0xFF00AAAAU,
+        0xFFAA0000U, 0xFFAA00AAU, 0xFFFFAA00U, 0xFFAAAAAAU,
+        0xFF555555U, 0xFF5555FFU, 0xFF55FF55U, 0xFF55FFFFU,
+        0xFFFF5555U, 0xFFFF55FFU, 0xFFFFFF55U, 0xFFFFFFFFU
+    };
     ImDrawList* draw = ImGui::GetBackgroundDrawList();
     float cursor = rightAligned ? x - textWidth(text) : x;
     const ImGuiIO& io = ImGui::GetIO();
     const float scaleX = static_cast<float>(scaleFactor) / std::max(io.DisplayFramebufferScale.x, 1.0e-6F);
     const float scaleY = static_cast<float>(scaleFactor) / std::max(io.DisplayFramebufferScale.y, 1.0e-6F);
+    const auto toTint = [](unsigned int rgba) {
+        return IM_COL32((rgba >> 16U) & 255U, (rgba >> 8U) & 255U,
+                        rgba & 255U, (rgba >> 24U) & 255U);
+    };
+    const auto shadowColor = [](unsigned int rgba) {
+        const unsigned int a = (rgba >> 24U) & 255U;
+        const unsigned int r = ((rgba >> 16U) & 255U) >> 2U;
+        const unsigned int g = ((rgba >> 8U) & 255U) >> 2U;
+        const unsigned int b = (rgba & 255U) >> 2U;
+        return (a << 24U) | (r << 16U) | (g << 8U) | b;
+    };
     const auto drawGlyph = [&](unsigned char character, float gx, float gy, ImU32 tint) {
         if (character == ' ') return;
         const int advance = charWidths_[character];
@@ -324,13 +364,52 @@ void GameHud::drawText(float x, float y, std::string_view text, int scaleFactor,
         draw->AddImage(textureId(asciiTexture_), ImVec2(gx * scaleX, gy * scaleY),
                        ImVec2((gx + visible) * scaleX, (gy + 8.0F) * scaleY), uv0, uv1, tint);
     };
-    for (unsigned char character : text) {
+
+    unsigned int currentColor = color;
+    bool bold = false;
+    bool underline = false;
+    bool strike = false;
+    for (std::size_t i = 0; i < text.size();) {
+        unsigned char character = static_cast<unsigned char>(text[i]);
+        char code = 0;
+        if (character == 0xC2 && i + 2 < text.size() &&
+            static_cast<unsigned char>(text[i + 1]) == 0xA7) {
+            code = static_cast<char>(std::tolower(static_cast<unsigned char>(text[i + 2])));
+            i += 3;
+        } else if (character == 0xA7 && i + 1 < text.size()) {
+            code = static_cast<char>(std::tolower(static_cast<unsigned char>(text[i + 1])));
+            i += 2;
+        }
+        if (code != 0) {
+            constexpr const char* colorCodes = "0123456789abcdef";
+            if (const char* found = std::strchr(colorCodes, code)) {
+                const std::size_t index = static_cast<std::size_t>(found - colorCodes);
+                currentColor = (color & 0xFF000000U) | (vanillaColors[index] & 0x00FFFFFFU);
+                bold = underline = strike = false;
+            } else if (code == 'l') bold = true;
+            else if (code == 'n') underline = true;
+            else if (code == 'm') strike = true;
+            else if (code == 'r') { currentColor = color; bold = underline = strike = false; }
+            continue;
+        }
+        ++i;
         const int advance = charWidths_[character];
-        drawGlyph(character, cursor + 1.0F, y + 1.0F, IM_COL32(0, 0, 0, 180));
-        const ImU32 tint = IM_COL32((color >> 16U) & 255U, (color >> 8U) & 255U,
-                                    color & 255U, (color >> 24U) & 255U);
+        const ImU32 shadow = toTint(shadowColor(currentColor));
+        const ImU32 tint = toTint(currentColor);
+        drawGlyph(character, cursor + 1.0F, y + 1.0F, shadow);
         drawGlyph(character, cursor, y, tint);
-        cursor += static_cast<float>(advance);
+        if (bold && character != ' ') {
+            drawGlyph(character, cursor + 1.0F, y, tint);
+            drawGlyph(character, cursor + 2.0F, y + 1.0F, shadow);
+        }
+        const float decoratedWidth = static_cast<float>(advance + (bold && character != ' ' ? 1 : 0));
+        if (strike && character != ' ')
+            draw->AddRectFilled(ImVec2(cursor * scaleX, (y + 4.0F) * scaleY),
+                                ImVec2((cursor + decoratedWidth) * scaleX, (y + 5.0F) * scaleY), tint);
+        if (underline && character != ' ')
+            draw->AddRectFilled(ImVec2(cursor * scaleX, (y + 8.0F) * scaleY),
+                                ImVec2((cursor + decoratedWidth) * scaleX, (y + 9.0F) * scaleY), tint);
+        cursor += decoratedWidth;
     }
 }
 
@@ -401,8 +480,10 @@ bool GameHud::drawBuiltinEntityStack(const ItemStack& stack, float x, float y, i
                           glm::translate(root,glm::vec3(1,7,15)/16.0F));
         appendGuiModelBox(quads,64,64,0,0,-1,-2,-15,2,4,1,
                           glm::translate(root,glm::vec3(8,7,15)/16.0F));
-        const BlockId chestType = stack.itemId == static_cast<std::uint16_t>(BlockId::TrappedChest) ? BlockId::TrappedChest :
-                                  stack.itemId == static_cast<std::uint16_t>(BlockId::EnderChest) ? BlockId::EnderChest : BlockId::Chest;
+        const BlockId chestType = (stack.itemId == static_cast<std::uint16_t>(BlockId::TrappedChest) ||
+                                  (placed && *placed == BlockId::TrappedChest)) ? BlockId::TrappedChest :
+                                  (stack.itemId == static_cast<std::uint16_t>(BlockId::EnderChest) ||
+                                  (placed && *placed == BlockId::EnderChest)) ? BlockId::EnderChest : BlockId::Chest;
         texture = chestType == BlockId::TrappedChest ? trappedChestItemTexture_ :
                   (chestType == BlockId::EnderChest ? enderChestItemTexture_ : chestItemTexture_);
     } else if (isShulker) {
@@ -502,7 +583,7 @@ bool GameHud::drawBlockModelStack(const ItemStack& stack, float x, float y, int 
         }
     }
     if (quads.empty()) return false;
-    std::sort(quads.begin(),quads.end(),[](const DrawQuad& a,const DrawQuad& b){return a.depth<b.depth;});
+    std::stable_sort(quads.begin(),quads.end(),[](const DrawQuad& a,const DrawQuad& b){return a.depth<b.depth;});
     ImDrawList* draw=ImGui::GetBackgroundDrawList();
     const ImGuiIO& io=ImGui::GetIO();
     const float sx=static_cast<float>(scaleFactor)/std::max(io.DisplayFramebufferScale.x,1.0e-6F);
@@ -529,29 +610,47 @@ void GameHud::drawStack(const ItemStack& stack, float x, float y, int scaleFacto
     bool rendered = drawBuiltinEntityStack(stack,x,y,scaleFactor);
     if (!rendered) rendered = drawBlockModelStack(stack,x,y,scaleFactor);
     if (!rendered) {
-        std::string icon = item.iconResource;
-        if (stack.itemId == 349) {
+        std::vector<std::string> icons = item.iconLayers;
+        if (icons.empty() && !item.iconResource.empty()) icons.push_back(item.iconResource);
+        if (stack.itemId == 347) {
+            char buffer[48];
+            std::snprintf(buffer, sizeof(buffer), "minecraft:items/clock_%02d", dynamicClockFrame_ & 63);
+            icons = {buffer};
+        } else if (stack.itemId == 345) {
+            char buffer[48];
+            std::snprintf(buffer, sizeof(buffer), "minecraft:items/compass_%02d", dynamicCompassFrame_ & 31);
+            icons = {buffer};
+        } else if (stack.itemId == 263 && stack.damage == 1) {
+            icons = {blockAtlas_.data().contains("minecraft:items/charcoal")
+                ? "minecraft:items/charcoal" : "minecraft:items/coal"};
+        } else if (stack.itemId == 349) {
             constexpr std::array<const char*, 4> fish = {"fish_cod_raw", "fish_salmon_raw", "fish_clownfish_raw", "fish_pufferfish_raw"};
-            icon = std::string("minecraft:items/") + fish[std::min<std::size_t>(stack.damage, 3)];
+            icons = {std::string("minecraft:items/") + fish[std::min<std::size_t>(stack.damage, 3)]};
         } else if (stack.itemId == 350) {
-            icon = std::string("minecraft:items/") + (stack.damage == 1 ? "fish_salmon_cooked" : "fish_cod_cooked");
+            icons = {std::string("minecraft:items/") + (stack.damage == 1 ? "fish_salmon_cooked" : "fish_cod_cooked")};
         } else if (stack.itemId == 351) {
             constexpr std::array<const char*, 16> dyes = {"black","red","green","brown","blue","purple","cyan","silver","gray","pink","lime","yellow","light_blue","magenta","orange","white"};
-            icon = std::string("minecraft:items/dye_powder_") + dyes[std::min<std::size_t>(stack.damage, 15)];
+            icons = {std::string("minecraft:items/dye_powder_") + dyes[std::min<std::size_t>(stack.damage, 15)]};
         }
-        const AtlasSprite* sprite = nullptr;
-        if (!icon.empty() && blockAtlas_.data().contains(icon)) sprite = &blockAtlas_.data().sprite(icon);
-        if (sprite == nullptr && item.placedBlock) {
+
+        if (icons.empty() && item.placedBlock) {
             const BlockState state = makeBlockState(static_cast<std::uint16_t>(*item.placedBlock), static_cast<std::uint8_t>(stack.damage & 15U));
-            sprite = &blockAtlas_.data().sprite(BlockRegistry::texture(state, Face::Up));
+            icons.push_back(blockAtlas_.data().sprite(BlockRegistry::texture(state, Face::Up)).name);
         }
-        if (sprite != nullptr && sprite->name != "minecraft:missingno") {
+        if (!icons.empty()) {
             ImDrawList* draw = ImGui::GetBackgroundDrawList();
             const ImGuiIO& io = ImGui::GetIO();
             const float scaleX = static_cast<float>(scaleFactor) / std::max(io.DisplayFramebufferScale.x, 1.0e-6F);
             const float scaleY = static_cast<float>(scaleFactor) / std::max(io.DisplayFramebufferScale.y, 1.0e-6F);
-            draw->AddImage(textureId(blockAtlas_.id()), ImVec2(x * scaleX, y * scaleY), ImVec2((x + 16.0F) * scaleX, (y + 16.0F) * scaleY),
-                           ImVec2(sprite->bounds.u0, sprite->bounds.v0), ImVec2(sprite->bounds.u1, sprite->bounds.v1));
+            for (const std::string& icon : icons) {
+                if (icon.empty() || !blockAtlas_.data().contains(icon)) continue;
+                const AtlasSprite& sprite = blockAtlas_.data().sprite(icon);
+                if (sprite.name == "minecraft:missingno") continue;
+                draw->AddImage(textureId(blockAtlas_.id()), ImVec2(x * scaleX, y * scaleY),
+                               ImVec2((x + 16.0F) * scaleX, (y + 16.0F) * scaleY),
+                               ImVec2(sprite.bounds.u0, sprite.bounds.v0),
+                               ImVec2(sprite.bounds.u1, sprite.bounds.v1));
+            }
         }
     }
     if (count && stack.count > 1) {
@@ -618,6 +717,7 @@ void GameHud::renderHotbar(const Player& player, int scaledWidth,
 }
 
 void GameHud::interactInventorySlot(ItemStack& slot, bool rightClick, bool creative) {
+    static_cast<void>(creative);
     if (rightClick) {
         if (cursorStack_.empty()) {
             if (slot.empty()) return;
@@ -630,14 +730,14 @@ void GameHud::interactInventorySlot(ItemStack& slot, bool rightClick, bool creat
         if (slot.empty()) {
             slot = cursorStack_;
             slot.count = 1;
-            if (!creative) cursorStack_.shrink(1);
+            cursorStack_.shrink(1);
             return;
         }
         if (slot.sameItem(cursorStack_)) {
             const int limit = items_.get(slot.itemId).maxStackSize;
             if (slot.count < limit) {
                 ++slot.count;
-                if (!creative) cursorStack_.shrink(1);
+                cursorStack_.shrink(1);
             }
         }
         return;
@@ -1505,8 +1605,20 @@ void GameHud::render(const World& world, Player& player, const Camera& camera,
                      const WorldConfig& config, const ChunkStreamer& streamer,
                      const LightingEngine& lighting, const WorldRenderer& renderer,
                      const std::optional<RaycastHit>& hit,
-                     int framebufferWidth, int framebufferHeight, double framesPerSecond,
+                     int framebufferWidth, int framebufferHeight, double framesPerSecond, double worldTime,
                      bool showDebug, bool paused, bool inventoryOpen) {
+    const double dayFraction = std::fmod(worldTime, 24000.0) / 24000.0;
+    dynamicClockFrame_ = static_cast<int>(std::floor((dayFraction < 0.0 ? dayFraction + 1.0 : dayFraction) * 64.0)) & 63;
+    const glm::dvec3 toSpawn = player.respawnPosition() - player.feetPosition();
+    const glm::vec3 front = camera.front();
+    if ((toSpawn.x * toSpawn.x + toSpawn.z * toSpawn.z) > 1.0e-6 &&
+        (front.x * front.x + front.z * front.z) > 1.0e-6F) {
+        const double target = std::atan2(toSpawn.z, toSpawn.x);
+        const double facing = std::atan2(static_cast<double>(front.z), static_cast<double>(front.x));
+        double relative = (target - facing) / (2.0 * 3.14159265358979323846);
+        relative -= std::floor(relative);
+        dynamicCompassFrame_ = (16 + static_cast<int>(std::floor(relative * 32.0 + 0.5))) & 31;
+    }
     const ScaledResolution scaled = ScaledResolution::fromDisplay(
         framebufferWidth, framebufferHeight, config.guiScale, false);
     if (!inventoryOpen && !player.dead()) renderHotbar(player, scaled.scaledWidth, scaled.scaledHeight, scaled.scaleFactor);

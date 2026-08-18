@@ -4,6 +4,7 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cctype>
 #include <cstring>
 #include <ctime>
 #include <fstream>
@@ -220,26 +221,71 @@ void FrontEnd::buildAsciiWidths(const std::vector<unsigned char>& pixels) {
 
 float FrontEnd::textWidth(std::string_view text) const {
     float width = 0.0F;
-    for (unsigned char value : text) width += static_cast<float>(charWidths_[value]);
+    bool bold = false;
+    for (std::size_t i = 0; i < text.size();) {
+        const unsigned char value = static_cast<unsigned char>(text[i]);
+        char code = 0;
+        if (value == 0xC2 && i + 2 < text.size() &&
+            static_cast<unsigned char>(text[i + 1]) == 0xA7) {
+            code = static_cast<char>(std::tolower(static_cast<unsigned char>(text[i + 2])));
+            i += 3;
+        } else if (value == 0xA7 && i + 1 < text.size()) {
+            code = static_cast<char>(std::tolower(static_cast<unsigned char>(text[i + 1])));
+            i += 2;
+        }
+        if (code != 0) {
+            if (code == 'l') bold = true;
+            else if (code == 'r' || std::strchr("0123456789abcdef", code) != nullptr) bold = false;
+            continue;
+        }
+        ++i;
+        width += static_cast<float>(charWidths_[value]);
+        if (bold && value != ' ') width += 1.0F;
+    }
     return width;
 }
 
 void FrontEnd::drawText(float x, float y, std::string_view text,
                         unsigned int color, bool centered) const {
+    static constexpr std::array<unsigned int,16> vanillaColors={
+        0xFF000000U,0xFF0000AAU,0xFF00AA00U,0xFF00AAAAU,
+        0xFFAA0000U,0xFFAA00AAU,0xFFFFAA00U,0xFFAAAAAAU,
+        0xFF555555U,0xFF5555FFU,0xFF55FF55U,0xFF55FFFFU,
+        0xFFFF5555U,0xFFFF55FFU,0xFFFFFF55U,0xFFFFFFFFU};
     if (centered) x -= textWidth(text) * 0.5F;
     ImDrawList* draw = ImGui::GetForegroundDrawList();
     float cursor = x;
-    for (unsigned char character : text) {
-        const int characterWidth = charWidths_[character];
-        if (character != ' ') {
-            const int glyphX = character & 15;
-            const int glyphY = character >> 4;
-            draw->AddImage(textureId(ascii_),
-                ImVec2(pixel(cursor), pixel(y)), ImVec2(pixel(cursor + 8.0F), pixel(y + 8.0F)),
-                ImVec2(glyphX / 16.0F, glyphY / 16.0F),
-                ImVec2((glyphX + 1) / 16.0F, (glyphY + 1) / 16.0F), argb(color));
+    unsigned int currentColor=color;
+    bool bold=false,underline=false,strike=false;
+    const auto shadowColor=[](unsigned int rgba){
+        const unsigned int a=(rgba>>24U)&255U;
+        return (a<<24U)|((((rgba>>16U)&255U)>>2U)<<16U)|((((rgba>>8U)&255U)>>2U)<<8U)|((rgba&255U)>>2U);
+    };
+    for (std::size_t i=0;i<text.size();) {
+        const unsigned char character=static_cast<unsigned char>(text[i]);
+        char code=0;
+        if(character==0xC2&&i+2<text.size()&&static_cast<unsigned char>(text[i+1])==0xA7){code=static_cast<char>(std::tolower(static_cast<unsigned char>(text[i+2])));i+=3;}
+        else if(character==0xA7&&i+1<text.size()){code=static_cast<char>(std::tolower(static_cast<unsigned char>(text[i+1])));i+=2;}
+        if(code!=0){
+            constexpr const char* codes="0123456789abcdef";
+            if(const char* found=std::strchr(codes,code)){currentColor=(color&0xFF000000U)|(vanillaColors[static_cast<std::size_t>(found-codes)]&0x00FFFFFFU);bold=underline=strike=false;}
+            else if(code=='l')bold=true; else if(code=='n')underline=true; else if(code=='m')strike=true;
+            else if(code=='r'){currentColor=color;bold=underline=strike=false;}
+            continue;
         }
-        cursor += static_cast<float>(characterWidth);
+        ++i;
+        const int characterWidth=charWidths_[character];
+        if(character!=' '){
+            const int glyphX=character&15,glyphY=character>>4;
+            const ImVec2 uv0(glyphX/16.0F,glyphY/16.0F),uv1((glyphX+1)/16.0F,(glyphY+1)/16.0F);
+            draw->AddImage(textureId(ascii_),ImVec2(pixel(cursor+1),pixel(y+1)),ImVec2(pixel(cursor+9),pixel(y+9)),uv0,uv1,argb(shadowColor(currentColor)));
+            draw->AddImage(textureId(ascii_),ImVec2(pixel(cursor),pixel(y)),ImVec2(pixel(cursor+8),pixel(y+8)),uv0,uv1,argb(currentColor));
+            if(bold) draw->AddImage(textureId(ascii_),ImVec2(pixel(cursor+1),pixel(y)),ImVec2(pixel(cursor+9),pixel(y+8)),uv0,uv1,argb(currentColor));
+        }
+        const float advance=static_cast<float>(characterWidth+(bold&&character!=' '?1:0));
+        if(strike&&character!=' ')draw->AddRectFilled(ImVec2(pixel(cursor),pixel(y+4)),ImVec2(pixel(cursor+advance),pixel(y+5)),argb(currentColor));
+        if(underline&&character!=' ')draw->AddRectFilled(ImVec2(pixel(cursor),pixel(y+8)),ImVec2(pixel(cursor+advance),pixel(y+9)),argb(currentColor));
+        cursor+=advance;
     }
 }
 

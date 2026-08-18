@@ -231,8 +231,9 @@ void ChunkStreamer::cacheChunk(std::unique_ptr<Chunk> chunk) {
     cache_.insert_or_assign(chunkKey, CacheEntry{std::move(chunk), ++useCounter_});
 }
 
-void ChunkStreamer::trimCache() {
-    while (cache_.size() > cacheCapacity_) {
+void ChunkStreamer::trimCache(std::size_t maximumEvictions) {
+    std::size_t evicted = 0;
+    while (cache_.size() > cacheCapacity_ && evicted < maximumEvictions) {
         auto oldest = cache_.end();
         for (auto iterator = cache_.begin(); iterator != cache_.end(); ++iterator) {
             if (oldest == cache_.end() || iterator->second.lastUse < oldest->second.lastUse)
@@ -248,6 +249,7 @@ void ChunkStreamer::trimCache() {
             }
         }
         cache_.erase(oldest);
+        ++evicted;
     }
 }
 
@@ -356,7 +358,7 @@ ChunkStreamChanges ChunkStreamer::update(double playerX, double playerZ,
         cache_.erase(iterator);
         changes.loaded.push_back(coordinate);
     }
-    trimCache();
+    if (withinBudget()) trimCache(1);
 
     // Disk-backed chunks are checked before terrain generation, but region
     // I/O is intentionally incremental. The old Stage 8 loop could probe the

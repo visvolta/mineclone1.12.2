@@ -48,7 +48,7 @@ private:
     [[nodiscard]] static std::uint64_t key(int chunkX, int chunkZ);
     [[nodiscard]] bool schedule(int chunkX, int chunkZ, int priority);
     void cacheChunk(std::unique_ptr<Chunk> chunk);
-    void trimCache();
+    void trimCache(std::size_t maximumEvictions);
     [[nodiscard]] bool tryLoadSaved(int chunkX, int chunkZ, bool active, ChunkStreamChanges* changes);
 
     World& world_;

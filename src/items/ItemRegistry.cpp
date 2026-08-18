@@ -279,9 +279,13 @@ void ItemRegistry::registerBlockItems(const std::filesystem::path& assetRoot) {
         definition.id = numericId;
         definition.name = name;
         definition.displayName = displayNameFor(name, true);
-        definition.iconResource = resolveItemTexture(assetRoot, name);
+        definition.iconLayers = resolveItemTextures(assetRoot, name);
+        definition.iconResource = definition.iconLayers.empty() ? resolveItemTexture(assetRoot, name) : definition.iconLayers.front();
         definition.tab = inferTab(name, block);
-        definition.maxStackSize = 64;
+        const auto value = static_cast<std::uint16_t>(block);
+        const auto shulkerFirst = static_cast<std::uint16_t>(BlockId::WhiteShulkerBox);
+        const auto shulkerLast = static_cast<std::uint16_t>(BlockId::BlackShulkerBox);
+        definition.maxStackSize = value >= shulkerFirst && value <= shulkerLast ? 1 : 64;
         definition.hasSubtypes = true;
         definition.placedBlock = block;
         add(definition);
@@ -296,7 +300,8 @@ void ItemRegistry::registerStandaloneItems(const std::filesystem::path& assetRoo
         definition.id = row.id;
         definition.name = row.name;
         definition.displayName = displayNameFor(row.name, false);
-        definition.iconResource = resolveItemTexture(assetRoot, row.name);
+        definition.iconLayers = resolveItemTextures(assetRoot, row.name);
+        definition.iconResource = definition.iconLayers.empty() ? resolveItemTexture(assetRoot, row.name) : definition.iconLayers.front();
         definition.tab = inferTab(row.name, std::nullopt);
         definition.maxStackSize = inferMaxStack(row.name);
         definition.hasSubtypes = containsAny(row.name, {"fish", "dye", "potion", "spawn_egg", "skull", "banner"});
@@ -510,32 +515,30 @@ std::string ItemRegistry::displayNameFor(std::string_view resourceName, bool blo
     return humanize(resourceName);
 }
 
-std::string ItemRegistry::resolveItemTexture(const std::filesystem::path& assetRoot,
-                                             std::string_view resourceName) const {
+std::vector<std::string> ItemRegistry::resolveItemTextures(const std::filesystem::path& assetRoot,
+                                                      std::string_view resourceName) const {
     std::string modelName(resourceName);
     if (modelName == "wooden_door") modelName = "oak_door";
     else if (modelName == "boat") modelName = "oak_boat";
     else if (modelName == "fish") modelName = "cod";
     else if (modelName == "cooked_fish") modelName = "cooked_cod";
     else if (modelName == "totem_of_undying") modelName = "totem";
-    else if (modelName == "potion") return "minecraft:items/potion_bottle_drinkable";
-    else if (modelName == "splash_potion") return "minecraft:items/potion_bottle_splash";
-    else if (modelName == "lingering_potion") return "minecraft:items/potion_bottle_lingering";
-    else if (modelName == "dye") return "minecraft:items/dye_powder_black";
+    else if (modelName == "dye") modelName = "dye_powder_black";
 
-    // 1.12.2 shulker-box item models use builtin/entity and therefore have no
-    // layer0 sprite. Use the exact per-colour block particle/top texture from
-    // the JAR for the 2D inventory icon rather than falling back to missingno.
+    if (modelName == "potion") return {"minecraft:items/potion_bottle_drinkable"};
+    if (modelName == "splash_potion") return {"minecraft:items/potion_bottle_splash"};
+    if (modelName == "lingering_potion") return {"minecraft:items/potion_bottle_lingering"};
     if (modelName.ends_with("_shulker_box")) {
         const std::string color = modelName.substr(0, modelName.size() - std::string("_shulker_box").size());
-        return "minecraft:blocks/shulker_top_" + color;
+        return {"minecraft:blocks/shulker_top_" + color};
     }
 
     std::unordered_map<std::string, std::string> textures;
     std::unordered_set<std::string> visited;
     std::function<void(std::string, bool)> load = [&](std::string model, bool itemDefault) {
         if (model.starts_with("minecraft:")) model.erase(0, 10);
-        if (model == "builtin/entity" || model == "item/generated" || model == "item/handheld") return;
+        if (model == "builtin/entity" || model == "item/generated" || model == "item/handheld" ||
+            model == "item/handheld_rod") return;
         if (model.find('/') == std::string::npos) model.insert(0, itemDefault ? "item/" : "block/");
         if (!visited.insert(model).second) return;
         const auto path = assetRoot / "assets/minecraft/models" / (model + ".json");
@@ -565,13 +568,27 @@ std::string ItemRegistry::resolveItemTexture(const std::filesystem::path& assetR
         return value.substr(0, colon + 1) + path;
     };
 
-    for (std::string_view key : {"layer0", "particle", "all", "top", "side", "texture"}) {
+    std::vector<std::string> result;
+    for (int layer = 0; layer < 8; ++layer) {
+        const auto found = textures.find("layer" + std::to_string(layer));
+        if (found == textures.end()) break;
+        std::string resolved = resolve(found->second);
+        if (!resolved.empty()) result.push_back(std::move(resolved));
+    }
+    if (!result.empty()) return result;
+    for (std::string_view key : {"particle", "all", "top", "side", "texture"}) {
         const auto found = textures.find(std::string(key));
         if (found == textures.end()) continue;
         std::string resolved = resolve(found->second);
-        if (!resolved.empty()) return resolved;
+        if (!resolved.empty()) return {std::move(resolved)};
     }
-    return "minecraft:items/" + modelName;
+    return {"minecraft:items/" + modelName};
+}
+
+std::string ItemRegistry::resolveItemTexture(const std::filesystem::path& assetRoot,
+                                             std::string_view resourceName) const {
+    const std::vector<std::string> textures = resolveItemTextures(assetRoot, resourceName);
+    return textures.empty() ? std::string{} : textures.front();
 }
 
 CreativeTab ItemRegistry::inferTab(std::string_view name, std::optional<BlockId> block) {
@@ -600,7 +617,9 @@ CreativeTab ItemRegistry::inferTab(std::string_view name, std::optional<BlockId>
 
 int ItemRegistry::inferMaxStack(std::string_view name) {
     if (name == "bucket" || name == "sign" || name == "snowball" || name == "egg" ||
-        name == "ender_pearl" || name == "armor_stand" || name == "written_book") return 16;
+        name == "ender_pearl" || name == "armor_stand" || name == "written_book" ||
+        name == "banner") return 16;
+    if (name == "writable_book" || name == "cake") return 1;
     if (containsAny(name, {"water_bucket", "lava_bucket", "milk_bucket", "stew", "beetroot_soup",
                            "sword", "pickaxe", "shovel", "_axe", "hoe", "helmet", "chestplate", "leggings", "boots",
                            "bow", "fishing_rod", "flint_and_steel", "shears", "filled_map", "carrot_on_a_stick",

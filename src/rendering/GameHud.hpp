@@ -43,7 +43,7 @@ public:
                 const WorldConfig& config, const ChunkStreamer& streamer,
                 const LightingEngine& lighting, const WorldRenderer& renderer,
                 const std::optional<RaycastHit>& hit,
-                int framebufferWidth, int framebufferHeight, double framesPerSecond,
+                int framebufferWidth, int framebufferHeight, double framesPerSecond, double worldTime,
                 bool showDebug, bool paused, bool inventoryOpen);
     void endFrame();
 
@@ -152,6 +152,8 @@ private:
     bool returnToTitleRequested_ = false;
     bool respawnRequested_ = false;
     bool frameHostOpen_ = false;
+    int dynamicClockFrame_ = 0;
+    int dynamicCompassFrame_ = 16;
     std::vector<ItemStack> pendingCraftingDrops_{};
     std::vector<ExperienceDrop> experienceDrops_{};
 };

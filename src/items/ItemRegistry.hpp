@@ -32,6 +32,7 @@ struct ItemDefinition {
     std::string name;
     std::string displayName;
     std::string iconResource;
+    std::vector<std::string> iconLayers;
     CreativeTab tab = CreativeTab::Misc;
     int maxStackSize = 64;
     bool hasSubtypes = false;
@@ -61,6 +62,8 @@ private:
     [[nodiscard]] std::string displayNameFor(std::string_view resourceName, bool block) const;
     [[nodiscard]] std::string resolveItemTexture(const std::filesystem::path& assetRoot,
                                                  std::string_view resourceName) const;
+    [[nodiscard]] std::vector<std::string> resolveItemTextures(const std::filesystem::path& assetRoot,
+                                                              std::string_view resourceName) const;
     [[nodiscard]] static CreativeTab inferTab(std::string_view name, std::optional<BlockId> block);
     [[nodiscard]] static int inferMaxStack(std::string_view name);
     [[nodiscard]] static std::optional<BlockId> specialPlacedBlock(std::uint16_t itemId);

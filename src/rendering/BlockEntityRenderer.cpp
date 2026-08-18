@@ -201,12 +201,13 @@ void BlockEntityRenderer::render(const World& world,const glm::mat4& view,const 
 
 void BlockEntityRenderer::renderChest(const World& world,const RuntimeBlockEntity& e,const glm::mat4&,float partialTick){
     const BlockId id=static_cast<BlockId>(blockId(e.state));
+    const bool canPair = id != BlockId::EnderChest;
     const glm::ivec3 west=e.position+glm::ivec3(-1,0,0), north=e.position+glm::ivec3(0,0,-1);
-    if(static_cast<BlockId>(blockId(world.getBlock(west.x,west.y,west.z)))==id ||
-       static_cast<BlockId>(blockId(world.getBlock(north.x,north.y,north.z)))==id) return;
+    if(canPair && (static_cast<BlockId>(blockId(world.getBlock(west.x,west.y,west.z)))==id ||
+       static_cast<BlockId>(blockId(world.getBlock(north.x,north.y,north.z)))==id)) return;
 
     glm::ivec3 pair{}; bool large=false;
-    for(glm::ivec3 d: {glm::ivec3(1,0,0),glm::ivec3(0,0,1)}){
+    if (canPair) for(glm::ivec3 d: {glm::ivec3(1,0,0),glm::ivec3(0,0,1)}){
         const glm::ivec3 p=e.position+d;
         if(static_cast<BlockId>(blockId(world.getBlock(p.x,p.y,p.z)))==id){ pair=p; large=true; break; }
     }
@@ -291,27 +292,40 @@ void BlockEntityRenderer::renderSign(const World& world,const RuntimeBlockEntity
         textM=glm::scale(textM,glm::vec3(1.0F/96.0F,-1.0F/96.0F,1.0F/96.0F));
         for(int line=0;line<4;++line){
             const std::string& text=(*lines)[static_cast<std::size_t>(line)];
-            int width=0; for(unsigned char ch:text) width+=charWidths_[ch];
+            int width=0;
+            for (std::size_t i=0;i<text.size();) {
+                const unsigned char ch=static_cast<unsigned char>(text[i]);
+                if (ch==0xC2 && i+2<text.size() && static_cast<unsigned char>(text[i+1])==0xA7) { i+=3; continue; }
+                if (ch==0xA7 && i+1<text.size()) { i+=2; continue; }
+                width+=charWidths_[ch]; ++i;
+            }
             float cursor=-static_cast<float>(width)*0.5F;
             const float py=static_cast<float>(line*10-20);
-            for(unsigned char ch:text){
+            for(std::size_t i=0;i<text.size();){
+                const unsigned char ch=static_cast<unsigned char>(text[i]);
+                if (ch==0xC2 && i+2<text.size() && static_cast<unsigned char>(text[i+1])==0xA7) { i+=3; continue; }
+                if (ch==0xA7 && i+1<text.size()) { i+=2; continue; }
+                ++i;
                 const int advance=charWidths_[ch];
                 if(ch!=' '){
                     const int gx=(ch&15)*8, gy=(ch>>4)*8, visible=std::clamp(advance-1,1,8);
                     auto q=[&](float X,float Y){glm::vec4 r=textM*glm::vec4(X,Y,0,1);return glm::vec3(r);};
                     const std::array<glm::vec3,4> pos={q(cursor,py),q(cursor,py+8),q(cursor+visible,py+8),q(cursor+visible,py)};
-                    pushRectQuad(glyphs,pos,static_cast<float>(gx),static_cast<float>(gy),static_cast<float>(gx+visible),static_cast<float>(gy+8),128,128,1.0F);
+                    pushRectQuad(glyphs,pos,static_cast<float>(gx),static_cast<float>(gy),static_cast<float>(gx+visible),static_cast<float>(gy+8),128,128,0.12F);
                 }
                 cursor+=static_cast<float>(advance);
             }
         }
         if(!glyphs.empty()){
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
             glDepthMask(GL_FALSE);
             glBindTexture(GL_TEXTURE_2D,asciiTexture_);
             glBindBuffer(GL_ARRAY_BUFFER,vbo_);
             glBufferData(GL_ARRAY_BUFFER,glyphs.size()*sizeof(V),glyphs.data(),GL_DYNAMIC_DRAW);
             glDrawArrays(GL_TRIANGLES,0,static_cast<GLsizei>(glyphs.size()));
             glDepthMask(GL_TRUE);
+            glDisable(GL_BLEND);
         }
     }
 }
