@@ -111,6 +111,7 @@ std::string tileEntityId(RuntimeBlockEntityType type) {
         case RuntimeBlockEntityType::Sign: return "minecraft:sign";
         case RuntimeBlockEntityType::Bed: return "minecraft:bed";
         case RuntimeBlockEntityType::ShulkerBox: return "minecraft:shulker_box";
+        case RuntimeBlockEntityType::Furnace: return "minecraft:furnace";
     }
     return "minecraft:chest";
 }
@@ -192,6 +193,13 @@ LoadedPlayerState WorldSave::loadPlayer(Player& player) const {
     state.health = static_cast<float>(nbt::number(stored,"Health",20.0));
     state.air = static_cast<int>(nbt::integer(stored,"Air",300));
     state.fireTicks = static_cast<int>(nbt::integer(stored,"Fire",0));
+    state.foodLevel = static_cast<int>(nbt::integer(stored,"foodLevel",20));
+    state.foodSaturationLevel = static_cast<float>(nbt::number(stored,"foodSaturationLevel",5.0));
+    state.foodExhaustionLevel = static_cast<float>(nbt::number(stored,"foodExhaustionLevel",0.0));
+    state.foodTickTimer = static_cast<int>(nbt::integer(stored,"foodTickTimer",0));
+    state.experienceTotal = static_cast<int>(nbt::integer(stored,"XpTotal",0));
+    state.experienceLevel = static_cast<int>(nbt::integer(stored,"XpLevel",0));
+    state.experienceProgress = static_cast<float>(nbt::number(stored,"XpP",0.0));
 
     if (const nbt::Tag* inventory = nbt::find(stored, "Inventory");
         inventory != nullptr && inventory->type == nbt::Type::List) {
@@ -206,7 +214,10 @@ LoadedPlayerState WorldSave::loadPlayer(Player& player) const {
 
     player.restoreState(state.position, state.velocity, state.gameMode, state.selectedHotbar);
     player.setRespawnPosition(state.spawnPosition);
-    player.restoreSurvival(state.health,state.air,state.fireTicks);
+    player.restoreSurvival(state.health, state.air, state.fireTicks, false,
+                           state.foodLevel, state.foodSaturationLevel, state.foodExhaustionLevel,
+                           state.experienceTotal, state.experienceLevel, state.experienceProgress);
+    player.foodStats().restore(state.foodLevel, state.foodSaturationLevel, state.foodExhaustionLevel, state.foodTickTimer);
     return state;
 }
 
@@ -335,6 +346,13 @@ void WorldSave::saveLevel(const WorldConfig& config, const Player& player,
     storedPlayer["Health"] = nbt::Tag(player.health());
     storedPlayer["Air"] = nbt::Tag(static_cast<std::int16_t>(player.air()));
     storedPlayer["Fire"] = nbt::Tag(static_cast<std::int16_t>(player.fireTicks()));
+    storedPlayer["foodLevel"] = nbt::Tag(static_cast<std::int32_t>(player.foodStats().foodLevel()));
+    storedPlayer["foodTickTimer"] = nbt::Tag(static_cast<std::int32_t>(player.foodStats().foodTimer()));
+    storedPlayer["foodSaturationLevel"] = nbt::Tag(player.foodStats().saturationLevel());
+    storedPlayer["foodExhaustionLevel"] = nbt::Tag(player.foodStats().exhaustionLevel());
+    storedPlayer["XpTotal"] = nbt::Tag(static_cast<std::int32_t>(player.experienceTotal()));
+    storedPlayer["XpLevel"] = nbt::Tag(static_cast<std::int32_t>(player.experienceLevel()));
+    storedPlayer["XpP"] = nbt::Tag(player.experienceProgress());
     storedPlayer["Pos"] = nbt::Tag(nbt::Type::Double, nbt::List{
         nbt::Tag(player.feetPosition().x), nbt::Tag(player.feetPosition().y), nbt::Tag(player.feetPosition().z)});
     storedPlayer["Motion"] = nbt::Tag(nbt::Type::Double, nbt::List{
@@ -459,13 +477,19 @@ nbt::Document WorldSave::chunkDocument(const Chunk& chunk,
         if (entity.type == RuntimeBlockEntityType::ShulkerBox)
             tile["Color"] = nbt::Tag(static_cast<std::int8_t>(entity.color));
         if (entity.type == RuntimeBlockEntityType::Chest || entity.type == RuntimeBlockEntityType::TrappedChest ||
-            entity.type == RuntimeBlockEntityType::ShulkerBox) {
+            entity.type == RuntimeBlockEntityType::ShulkerBox || entity.type == RuntimeBlockEntityType::Furnace) {
             nbt::List items;
-            for (int slot = 0; slot < 27; ++slot) {
+            const int slots = entity.type == RuntimeBlockEntityType::Furnace ? 3 : 27;
+            for (int slot = 0; slot < slots; ++slot) {
                 const ItemStack& stack = entity.inventory[static_cast<std::size_t>(slot)];
                 if (!stack.empty()) items.push_back(itemStackTag(stack, slot));
             }
             tile["Items"] = nbt::Tag(nbt::Type::Compound, std::move(items));
+            if (entity.type == RuntimeBlockEntityType::Furnace) {
+                tile["BurnTime"] = nbt::Tag(static_cast<std::int16_t>(std::clamp(entity.furnaceBurnTime, 0, 32767)));
+                tile["CookTime"] = nbt::Tag(static_cast<std::int16_t>(std::clamp(entity.furnaceCookTime, 0, 32767)));
+                tile["CookTimeTotal"] = nbt::Tag(static_cast<std::int16_t>(std::clamp(entity.furnaceCookTimeTotal, 0, 32767)));
+            }
             // Stage 7 does not yet materialize vanilla loot tables. Preserve
             // LootTable/LootTableSeed from generated data until that gameplay
             // path exists instead of silently destroying the pending loot.

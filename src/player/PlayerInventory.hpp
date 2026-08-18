@@ -22,7 +22,7 @@ public:
     void selectHotbar(std::size_t slot);
     void scroll(int steps);
     void pickCreative(const ItemStack& stack);
-    void addStack(ItemStack& stack);
+    void addStack(ItemStack& stack, int maxStack = 64);
     [[nodiscard]] int findHotbarMatch(const ItemStack& stack) const;
 
 private:

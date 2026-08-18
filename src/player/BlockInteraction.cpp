@@ -41,7 +41,7 @@ void BlockInteraction::destroyBlock(World& world,LightingEngine& lighting,WorldR
         ItemStack& held=player.inventory().selected();
         const bool harvest=SurvivalRules::canHarvest(old,held);
         if(auto drop=SurvivalRules::primaryDrop(old,items_,harvest)){
-            itemEntities_.spawn(*drop, glm::dvec3(pos) + glm::dvec3(0.5, 0.35, 0.5), glm::dvec3(0.0, 0.12, 0.0));
+            itemEntities_.spawn(*drop, glm::dvec3(pos) + glm::dvec3(0.5, 0.35, 0.5));
         }
         if(BlockRegistry::get(old).hardness!=0.0F) { const ToolStats stats=SurvivalRules::toolStats(held.itemId); if(stats.toolClass!=ToolClass::None&&stats.toolClass!=ToolClass::Hoe) static_cast<void>(SurvivalRules::damageTool(held, stats.toolClass == ToolClass::Sword ? 2 : 1)); }
     }

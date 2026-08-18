@@ -32,9 +32,9 @@ void PlayerInventory::pickCreative(const ItemStack& stack) {
     main_[selectedHotbar_] = stack;
 }
 
-void PlayerInventory::addStack(ItemStack& stack) {
+void PlayerInventory::addStack(ItemStack& stack, int maxStack) {
     if (stack.empty()) return;
-    const int maxStack = 64;
+    maxStack = std::clamp(maxStack, 1, 64);
     for (ItemStack& slot : main_) {
         if (stack.empty()) return;
         if (!slot.empty() && slot.sameItem(stack) && slot.count < maxStack) {

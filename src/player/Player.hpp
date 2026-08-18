@@ -3,11 +3,12 @@
 #include <glm/vec3.hpp>
 
 #include "player/PlayerInventory.hpp"
+#include "survival/FoodStats.hpp"
 
 class World;
 
 enum class GameMode { Survival, Creative };
-enum class DamageType { Generic, Fall, Drown, Fire, Lava, Cactus, Void };
+enum class DamageType { Generic, Fall, Drown, Fire, Lava, Cactus, Void, Starve };
 
 struct Aabb {
     glm::dvec3 minimum;
@@ -24,6 +25,7 @@ struct PlayerInput {
     bool jumpPressed = false;
     bool sneak = false;
     bool sprint = false;
+    bool useItem = false;
 };
 
 class Player {
@@ -53,16 +55,35 @@ public:
     [[nodiscard]] int fireTicks() const { return fireTicks_; }
     [[nodiscard]] bool dead() const { return dead_; }
     [[nodiscard]] int armorValue() const;
+    [[nodiscard]] const FoodStats& foodStats() const { return foodStats_; }
+    [[nodiscard]] FoodStats& foodStats() { return foodStats_; }
+    [[nodiscard]] int ticksExisted() const { return ticksExisted_; }
+    [[nodiscard]] int hurtTime() const { return hurtTime_; }
+    [[nodiscard]] int maxHurtTime() const { return maxHurtTime_; }
+    [[nodiscard]] float attackedAtYaw() const { return attackedAtYaw_; }
+    [[nodiscard]] float hurtCameraStrength(float partialTick) const;
+    [[nodiscard]] int itemUseTicks() const { return itemUseTicks_; }
+    [[nodiscard]] bool usingItem() const { return usingItem_; }
+    [[nodiscard]] float itemUseProgress(float partialTick = 0.0F) const;
+    [[nodiscard]] int experienceTotal() const { return experienceTotal_; }
+    [[nodiscard]] int experienceLevel() const { return experienceLevel_; }
+    [[nodiscard]] float experienceProgress() const { return experienceProgress_; }
+    void addExperience(int amount);
+    void heal(float amount);
+    void addExhaustion(float amount) { if (gameMode_ == GameMode::Survival) foodStats_.addExhaustion(amount); }
     bool hurt(float amount, DamageType type = DamageType::Generic);
     void respawn();
     void setRespawnPosition(glm::dvec3 value) { respawnPosition_ = value; }
-    void restoreSurvival(float health, int air, int fireTicks, bool dead = false);
+    void restoreSurvival(float health, int air, int fireTicks, bool dead = false,
+                         int foodLevel = 20, float saturation = 5.0F, float exhaustion = 0.0F,
+                         int experienceTotal = 0, int experienceLevel = 0, float experienceProgress = 0.0F);
     [[nodiscard]] const PlayerInventory& inventory() const { return inventory_; }
 
 private:
     void moveWithCollisions(const World& world, double x, double y, double z, bool sneaking);
     void moveRelative(float strafe, float forward, float amount, const glm::vec3& lookDirection);
     void tickSurvival(const World& world);
+    void tickItemUse(bool useHeldItem);
 
     glm::dvec3 position_;
     glm::dvec3 previousPosition_;
@@ -80,4 +101,15 @@ private:
     int hurtResistantTime_ = 0;
     int fireDamageTicker_ = 0;
     bool dead_ = false;
+    FoodStats foodStats_{};
+    int ticksExisted_ = 0;
+    int hurtTime_ = 0;
+    int maxHurtTime_ = 10;
+    float attackedAtYaw_ = 0.0F;
+    bool usingItem_ = false;
+    int itemUseTicks_ = 0;
+    std::uint16_t usingItemId_ = 0;
+    int experienceTotal_ = 0;
+    int experienceLevel_ = 0;
+    float experienceProgress_ = 0.0F;
 };

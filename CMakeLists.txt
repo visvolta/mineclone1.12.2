@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(Blockcraft VERSION 0.14.2 LANGUAGES C CXX)
+project(Blockcraft VERSION 0.15.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -65,6 +65,7 @@ set(BLOCKCRAFT_FOUNDATION_SOURCES
     src/player/Player.cpp
     src/player/PlayerInventory.cpp
     src/survival/MiningRules.cpp
+    src/survival/FoodStats.cpp
     src/world/Chunk.cpp
     src/world/World.cpp
     src/world/Raycast.cpp
@@ -72,21 +73,19 @@ set(BLOCKCRAFT_FOUNDATION_SOURCES
 
 include(CTest)
 if(BUILD_TESTING)
-    add_executable(blockcraft_registry_tests
-        tests/BlockRegistryParityTests.cpp
-        src/blocks/BlockRegistry.cpp
-    )
-    target_include_directories(blockcraft_registry_tests PRIVATE src)
-    if(MSVC)
-        target_compile_options(blockcraft_registry_tests PRIVATE /W4 /permissive- /UNDEBUG)
-    else()
-        target_compile_options(blockcraft_registry_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
-    endif()
-    add_test(NAME blockcraft_registry COMMAND blockcraft_registry_tests)
-
     add_executable(blockcraft_foundation_tests
-        tests/FoundationTests.cpp
-        ${BLOCKCRAFT_FOUNDATION_SOURCES}
+        tests/PlayerSurvivalTests.cpp
+        src/blocks/BlockRegistry.cpp
+        src/blocks/BlockShape.cpp
+        src/core/Json.cpp
+        src/items/ItemRegistry.cpp
+        src/player/Player.cpp
+        src/player/PlayerInventory.cpp
+        src/survival/MiningRules.cpp
+        src/survival/FoodStats.cpp
+        src/world/Chunk.cpp
+        src/world/World.cpp
+        src/world/Raycast.cpp
     )
     target_include_directories(blockcraft_foundation_tests PRIVATE src)
     target_link_libraries(blockcraft_foundation_tests PRIVATE glm::glm Threads::Threads)
@@ -95,7 +94,7 @@ if(BUILD_TESTING)
     else()
         target_compile_options(blockcraft_foundation_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
     endif()
-    add_test(NAME blockcraft_foundation COMMAND blockcraft_foundation_tests)
+    add_test(NAME blockcraft_player_survival COMMAND blockcraft_foundation_tests)
 endif()
 
 if(NOT BLOCKCRAFT_REQUIRE_MINECRAFT_ASSETS)
@@ -247,6 +246,7 @@ endif()
 
 set(BLOCKCRAFT_CORE_SOURCES
     src/core/Json.cpp
+    src/crafting/CraftingSystem.cpp
     src/core/ThreadPool.cpp
     src/worldgen/ChunkGeneratorSettings.cpp
     src/worldgen/FlatGeneratorSettings.cpp
@@ -260,6 +260,8 @@ set(BLOCKCRAFT_CORE_SOURCES
     src/player/Player.cpp
     src/player/PlayerInventory.cpp
     src/survival/MiningRules.cpp
+    src/survival/FoodStats.cpp
+    src/survival/FurnaceRules.cpp
     src/items/ItemRegistry.cpp
     src/world/Chunk.cpp
     src/world/World.cpp
@@ -320,19 +322,43 @@ else()
 endif()
 
 if(BUILD_TESTING)
-    add_executable(blockcraft_tests tests/CoreTests.cpp ${BLOCKCRAFT_CORE_SOURCES})
-    target_include_directories(blockcraft_tests PRIVATE src ${stb_SOURCE_DIR})
-    target_compile_definitions(blockcraft_tests PRIVATE BLOCKCRAFT_ASSET_ROOT="${BLOCKCRAFT_ASSET_ROOT}")
-    target_link_libraries(blockcraft_tests PRIVATE glm::glm cubiomes Threads::Threads zlibstatic)
+    add_executable(blockcraft_gameplay_tests
+        tests/GameplayParityTests.cpp
+        src/blocks/BlockRegistry.cpp
+        src/core/Json.cpp
+        src/items/ItemRegistry.cpp
+        src/player/PlayerInventory.cpp
+        src/crafting/CraftingSystem.cpp
+        src/survival/FoodStats.cpp
+        src/survival/FurnaceRules.cpp
+        src/survival/MiningRules.cpp
+    )
+    target_include_directories(blockcraft_gameplay_tests PRIVATE src)
+    target_compile_definitions(blockcraft_gameplay_tests PRIVATE BLOCKCRAFT_ASSET_ROOT="${BLOCKCRAFT_ASSET_ROOT}")
     if(MSVC)
-        target_compile_options(blockcraft_tests PRIVATE $<$<CONFIG:Debug>:/O2> /UNDEBUG)
+        target_compile_options(blockcraft_gameplay_tests PRIVATE /W4 /permissive- /UNDEBUG)
     else()
-        target_compile_options(blockcraft_tests PRIVATE -UNDEBUG)
+        target_compile_options(blockcraft_gameplay_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
     endif()
-    add_test(NAME blockcraft_core COMMAND blockcraft_tests)
+    add_test(NAME blockcraft_gameplay_parity COMMAND blockcraft_gameplay_tests)
 
-    add_executable(blockcraft_rendering_parity_tests
-        tests/RenderingParityTests.cpp
+    add_executable(blockcraft_persistence_tests
+        tests/PersistenceTests.cpp
+        src/save/Nbt.cpp
+        src/save/RegionFile.cpp
+        src/world/Chunk.cpp
+    )
+    target_include_directories(blockcraft_persistence_tests PRIVATE src)
+    target_link_libraries(blockcraft_persistence_tests PRIVATE zlibstatic)
+    if(MSVC)
+        target_compile_options(blockcraft_persistence_tests PRIVATE /W4 /permissive- /UNDEBUG)
+    else()
+        target_compile_options(blockcraft_persistence_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
+    endif()
+    add_test(NAME blockcraft_persistence COMMAND blockcraft_persistence_tests)
+
+    add_executable(blockcraft_rendering_model_tests
+        tests/RenderingModelTests.cpp
         src/blocks/BlockRegistry.cpp
         src/core/Json.cpp
         src/rendering/TextureAtlasData.cpp
@@ -340,106 +366,15 @@ if(BUILD_TESTING)
         src/rendering/BlockStateModelMap.cpp
         src/rendering/ImageLoader.cpp
     )
-    target_include_directories(blockcraft_rendering_parity_tests PRIVATE src ${stb_SOURCE_DIR})
-    target_compile_definitions(blockcraft_rendering_parity_tests PRIVATE
-        BLOCKCRAFT_ASSET_ROOT="${BLOCKCRAFT_ASSET_ROOT}")
-    target_link_libraries(blockcraft_rendering_parity_tests PRIVATE glm::glm)
+    target_include_directories(blockcraft_rendering_model_tests PRIVATE src ${stb_SOURCE_DIR})
+    target_compile_definitions(blockcraft_rendering_model_tests PRIVATE BLOCKCRAFT_ASSET_ROOT="${BLOCKCRAFT_ASSET_ROOT}")
+    target_link_libraries(blockcraft_rendering_model_tests PRIVATE glm::glm)
     if(MSVC)
-        target_compile_options(blockcraft_rendering_parity_tests PRIVATE /W4 /permissive- /UNDEBUG)
+        target_compile_options(blockcraft_rendering_model_tests PRIVATE /W4 /permissive- /UNDEBUG)
     else()
-        target_compile_options(blockcraft_rendering_parity_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
+        target_compile_options(blockcraft_rendering_model_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
     endif()
-    add_test(NAME blockcraft_rendering_parity COMMAND blockcraft_rendering_parity_tests)
-
-    add_executable(blockcraft_item_inventory_tests
-        tests/ItemInventoryTests.cpp
-        src/blocks/BlockRegistry.cpp
-        src/core/Json.cpp
-        src/items/ItemRegistry.cpp
-        src/player/PlayerInventory.cpp
-    )
-    target_include_directories(blockcraft_item_inventory_tests PRIVATE src)
-    target_compile_definitions(blockcraft_item_inventory_tests PRIVATE
-        BLOCKCRAFT_ASSET_ROOT="${BLOCKCRAFT_ASSET_ROOT}")
-    if(MSVC)
-        target_compile_options(blockcraft_item_inventory_tests PRIVATE /W4 /permissive- /UNDEBUG)
-    else()
-        target_compile_options(blockcraft_item_inventory_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
-    endif()
-    add_test(NAME blockcraft_item_inventory COMMAND blockcraft_item_inventory_tests)
-
-    add_executable(blockcraft_placement_rules_tests
-        tests/PlacementRulesTests.cpp
-        src/blocks/BlockRegistry.cpp
-        src/blocks/BlockShape.cpp
-        src/blocks/PlacementRules.cpp
-        src/core/Json.cpp
-        src/items/ItemRegistry.cpp
-        src/player/Player.cpp
-        src/player/PlayerInventory.cpp
-        src/survival/MiningRules.cpp
-        src/world/Chunk.cpp
-        src/world/World.cpp
-        src/world/Raycast.cpp
-    )
-    target_include_directories(blockcraft_placement_rules_tests PRIVATE src)
-    target_compile_definitions(blockcraft_placement_rules_tests PRIVATE
-        BLOCKCRAFT_ASSET_ROOT="${BLOCKCRAFT_ASSET_ROOT}")
-    target_link_libraries(blockcraft_placement_rules_tests PRIVATE glm::glm)
-    if(MSVC)
-        target_compile_options(blockcraft_placement_rules_tests PRIVATE /W4 /permissive- /UNDEBUG)
-    else()
-        target_compile_options(blockcraft_placement_rules_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
-    endif()
-    add_test(NAME blockcraft_placement_rules COMMAND blockcraft_placement_rules_tests)
-
-    add_executable(blockcraft_block_entity_tests
-        tests/BlockEntityTests.cpp
-        src/blocks/BlockRegistry.cpp
-        src/world/Chunk.cpp
-        src/world/World.cpp
-        src/world/BlockEntitySystem.cpp
-        src/save/Nbt.cpp
-    )
-    target_include_directories(blockcraft_block_entity_tests PRIVATE src)
-    target_link_libraries(blockcraft_block_entity_tests PRIVATE glm::glm zlibstatic)
-    if(MSVC)
-        target_compile_options(blockcraft_block_entity_tests PRIVATE /W4 /permissive- /UNDEBUG)
-    else()
-        target_compile_options(blockcraft_block_entity_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
-    endif()
-    add_test(NAME blockcraft_block_entities COMMAND blockcraft_block_entity_tests)
-
-    add_executable(blockcraft_save_format_tests
-        tests/SaveFormatTests.cpp
-        src/save/Nbt.cpp
-        src/save/RegionFile.cpp
-        src/world/Chunk.cpp
-    )
-    target_include_directories(blockcraft_save_format_tests PRIVATE src)
-    target_link_libraries(blockcraft_save_format_tests PRIVATE zlibstatic)
-    if(MSVC)
-        target_compile_options(blockcraft_save_format_tests PRIVATE /W4 /permissive- /UNDEBUG)
-    else()
-        target_compile_options(blockcraft_save_format_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
-    endif()
-    add_test(NAME blockcraft_save_formats COMMAND blockcraft_save_format_tests)
-
-    add_executable(blockcraft_survival_tests
-        tests/SurvivalTests.cpp
-        src/blocks/BlockRegistry.cpp
-        src/core/Json.cpp
-        src/items/ItemRegistry.cpp
-        src/player/PlayerInventory.cpp
-        src/survival/MiningRules.cpp
-    )
-    target_include_directories(blockcraft_survival_tests PRIVATE src)
-    if(MSVC)
-        target_compile_options(blockcraft_survival_tests PRIVATE /W4 /permissive- /UNDEBUG)
-    else()
-        target_compile_options(blockcraft_survival_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
-    endif()
-    add_test(NAME blockcraft_survival COMMAND blockcraft_survival_tests)
+    add_test(NAME blockcraft_rendering_models COMMAND blockcraft_rendering_model_tests)
 endif()
 
 set_property(DIRECTORY PROPERTY VS_STARTUP_PROJECT blockcraft)

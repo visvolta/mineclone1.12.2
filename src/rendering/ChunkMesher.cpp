@@ -48,7 +48,8 @@ bool shouldRenderFace(BlockState current, BlockState neighbor) {
         (currentId == BlockId::Ice && neighborId == BlockId::Ice)) return false;
     if ((isWater(currentId) && isWater(neighborId)) ||
         (isLava(currentId) && isLava(neighborId))) return false;
-    return !BlockRegistry::get(neighbor).opaque;
+    const BlockDefinition& neighborDefinition = BlockRegistry::get(neighbor);
+    return !(neighborDefinition.opaque && neighborDefinition.fullCube);
 }
 
 bool normalCube(BlockState state) {
@@ -449,7 +450,7 @@ bool shouldRenderFluidFace(const SectionSnapshot& snapshot, int x, int y, int z,
     const BlockState neighbor = snapshot.get(x + offset.x, y + offset.y, z + offset.z);
     if (sameFluid(neighbor, lava)) return false;
     if (offset.y > 0) return true;
-    return !BlockRegistry::get(neighbor).opaque;
+    return !normalCube(neighbor);
 }
 
 bool renderFluidBackFace(const SectionSnapshot& snapshot, int x, int y, int z, bool lava) {

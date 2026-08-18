@@ -11,6 +11,7 @@
 #include <glad/gl.h>
 
 #include "items/ItemRegistry.hpp"
+#include "crafting/CraftingSystem.hpp"
 #include "items/ItemStack.hpp"
 #include "world/Raycast.hpp"
 #include "world/BlockEntitySystem.hpp"
@@ -45,7 +46,9 @@ public:
     void endFrame();
 
     void openBlockEntityScreen(const BlockEntityAction& action);
-    void closeBlockEntityScreen();
+    void closeBlockEntityScreen(Player* player = nullptr);
+    void closePlayerCrafting(Player& player);
+    [[nodiscard]] std::vector<ItemStack> takeCraftingDrops();
     [[nodiscard]] bool hasBlockEntityScreen() const { return activeBlockEntityAction_.has_value(); }
     bool consumeScreenCloseRequest() { const bool value=screenCloseRequested_; screenCloseRequested_=false; return value; }
     bool consumeResumeRequest() { const bool value=resumeRequested_; resumeRequested_=false; return value; }
@@ -79,9 +82,11 @@ private:
     void interactInventorySlot(ItemStack& slot, bool rightClick, bool creative);
     void renderBlockEntityScreen(const World& world, Player& player, int scaledWidth, int scaledHeight, int scaleFactor);
     void renderContainerScreen(const World& world, Player& player, int scaledWidth, int scaledHeight, int scaleFactor);
+    void renderFurnaceScreen(const World& world, Player& player, int scaledWidth, int scaledHeight, int scaleFactor);
+    void renderCraftingTableScreen(Player& player, int scaledWidth, int scaledHeight, int scaleFactor);
     void renderSignEditor(int scaledWidth, int scaledHeight, int scaleFactor);
     void renderPauseMenu(int scaledWidth, int scaledHeight, int scaleFactor);
-    void renderSurvivalStatus(const Player& player, int scaledWidth, int scaledHeight, int scaleFactor) const;
+    void renderSurvivalStatus(const Player& player, int scaledWidth, int scaledHeight, int scaleFactor);
     void renderDeathScreen(const Player& player, int scaledWidth, int scaledHeight, int scaleFactor);
     bool menuButton(int id, float x, float y, float width, std::string_view label,
                     int scaleFactor, bool enabled = true);
@@ -97,6 +102,7 @@ private:
     const ItemRegistry& items_;
     const BlockRenderResources& resources_;
     BlockEntitySystem& blockEntities_;
+    CraftingSystem crafting_;
     GLuint widgetsTexture_ = 0;
     GLuint iconsTexture_ = 0;
     GLuint asciiTexture_ = 0;
@@ -106,6 +112,8 @@ private:
     GLuint creativeInventoryTexture_ = 0;
     GLuint creativeTabsTexture_ = 0;
     GLuint generic54Texture_ = 0;
+    GLuint craftingTableTexture_ = 0;
+    GLuint furnaceTexture_ = 0;
     GLuint chestItemTexture_ = 0;
     GLuint trappedChestItemTexture_ = 0;
     GLuint enderChestItemTexture_ = 0;
@@ -113,6 +121,13 @@ private:
     std::array<GLuint, 16> shulkerItemTextures_{};
     std::array<int, 256> charWidths_{};
     ItemStack cursorStack_{};
+    std::array<ItemStack, 4> playerCraftGrid_{};
+    std::array<ItemStack, 9> tableCraftGrid_{};
+    int hudUpdateCounter_ = 0;
+    int playerHealthDisplay_ = 20;
+    int lastPlayerHealthDisplay_ = 20;
+    int healthFlashUntil_ = 0;
+    std::uint64_t lastHealthChangeMs_ = 0;
     CreativeTab selectedCreativeTab_ = CreativeTab::BuildingBlocks;
     std::string searchText_;
     bool searchFocused_ = false;
@@ -124,4 +139,5 @@ private:
     bool returnToTitleRequested_ = false;
     bool respawnRequested_ = false;
     bool frameHostOpen_ = false;
+    std::vector<ItemStack> pendingCraftingDrops_{};
 };

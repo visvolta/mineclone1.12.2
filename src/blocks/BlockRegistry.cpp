@@ -404,8 +404,8 @@ std::array<BlockDefinition, 256> makeDefinitions() {
     set(BlockId::Furnace, {"furnace", RenderLayer::Solid, true, true, 3.5F, true, 255, 0, furnaceTextures});
     // Chests use a special model in vanilla. Until that renderer exists, keep a stable
     // cube placeholder but preserve their non-opaque/light-transparent behavior.
-    set(BlockId::Chest, {"chest", RenderLayer::Solid, false, true, 2.5F, false, 0, 0, all(T::PlanksOak)});
-    set(BlockId::TrappedChest, {"trapped_chest", RenderLayer::Solid, false, true, 2.5F, false, 0, 0, all(T::PlanksOak)});
+    set(BlockId::Chest, {"chest", RenderLayer::Solid, false, false, 2.5F, false, 0, 0, all(T::PlanksOak)});
+    set(BlockId::TrappedChest, {"trapped_chest", RenderLayer::Solid, false, false, 2.5F, false, 0, 0, all(T::PlanksOak)});
     set(BlockId::RedstoneOre, {"redstone_ore", RenderLayer::Solid, true, true, 3.0F, true, 255, 0, all(T::RedstoneOre)});
     set(BlockId::SnowLayer, {"snow_layer", RenderLayer::Cutout, false, false, 0.1F, false, 0, 0, all(T::Snow), BlockShape::SnowLayer});
     set(BlockId::Ice, {"ice", RenderLayer::Translucent, false, true, 0.5F, false, 3, 0, all(T::Ice)});
@@ -532,6 +532,11 @@ std::array<BlockDefinition, 256> makeDefinitions() {
         BlockId::Cake, BlockId::Anvil, BlockId::Hopper, BlockId::PistonHead, BlockId::EndRod,
         BlockId::ChorusPlant, BlockId::ChorusFlower
     }) definitions[static_cast<std::size_t>(id)].opaque = false;
+
+    for (BlockId id : {BlockId::Chest, BlockId::TrappedChest, BlockId::EnderChest}) {
+        auto& d = definitions[static_cast<std::size_t>(id)];
+        d.opaque = false; d.fullCube = false; d.lightOpacity = 0;
+    }
 
     return definitions;
 }

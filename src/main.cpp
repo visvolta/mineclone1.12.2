@@ -220,7 +220,7 @@ int main() {
 
         World world;
         BlockEntitySystem blockEntities;
-        ItemEntitySystem itemEntities;
+        ItemEntitySystem itemEntities(itemRegistry);
         Player player({0.5, 80.0, 0.5});
         LoadedPlayerState loadedPlayer = worldSave.loadPlayer(player);
 
@@ -263,7 +263,7 @@ int main() {
         frontEnd.reset();
         GameHud gameHud(window, BLOCKCRAFT_ASSET_ROOT, atlas, itemRegistry, blockRenderResources, blockEntities);
         BlockEntityRenderer blockEntityRenderer(BLOCKCRAFT_ASSET_ROOT, blockEntities);
-        ItemEntityRenderer itemEntityRenderer(BLOCKCRAFT_ASSET_ROOT, itemRegistry);
+        ItemEntityRenderer itemEntityRenderer(BLOCKCRAFT_ASSET_ROOT, itemRegistry, blockRenderResources, atlas);
         BlockInteraction interaction(itemRegistry, blockEntities, itemEntities);
         camera.setPosition(player.eyePosition());
         setCursorCaptured(window, true);
@@ -303,7 +303,10 @@ int main() {
             if (escapeDown && !escapeWasDown && !player.dead()) {
                 if (inventoryOpen) {
                     inventoryOpen = false;
-                    gameHud.closeBlockEntityScreen();
+                    gameHud.closeBlockEntityScreen(&player);
+                    gameHud.closePlayerCrafting(player);
+                    for (ItemStack& dropped : gameHud.takeCraftingDrops())
+                        itemEntities.spawn(dropped, player.feetPosition() + glm::dvec3(0.0, 0.5, 0.0));
                     setCursorCaptured(window, true);
                 } else {
                     paused = !paused;
@@ -317,10 +320,18 @@ int main() {
             const bool eDown = keyDown(window, GLFW_KEY_E);
             if (eDown && !eWasDown && !paused && !player.dead() && !gameHud.capturesTextInput()) {
                 if (inventoryOpen && gameHud.hasBlockEntityScreen()) {
-                    gameHud.closeBlockEntityScreen();
+                    gameHud.closeBlockEntityScreen(&player);
+                    gameHud.closePlayerCrafting(player);
+                    for (ItemStack& dropped : gameHud.takeCraftingDrops())
+                        itemEntities.spawn(dropped, player.feetPosition() + glm::dvec3(0.0, 0.5, 0.0));
                     inventoryOpen = false;
                 } else {
-                    gameHud.closeBlockEntityScreen();
+                    gameHud.closeBlockEntityScreen(&player);
+                    if (inventoryOpen) {
+                        gameHud.closePlayerCrafting(player);
+                        for (ItemStack& dropped : gameHud.takeCraftingDrops())
+                            itemEntities.spawn(dropped, player.feetPosition() + glm::dvec3(0.0, 0.5, 0.0));
+                    }
                     inventoryOpen = !inventoryOpen;
                 }
                 setCursorCaptured(window, !inventoryOpen);
@@ -363,6 +374,7 @@ int main() {
 
                 while (accumulator >= tickDuration) {
                     PlayerInput tickInput = inventoryOpen ? PlayerInput{} : readPlayerInput(window, jumpPressPending);
+                    if (!inventoryOpen) tickInput.useItem = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
                     player.tick(world, tickInput, camera.front());
                     if (!inventoryOpen) {
                         interaction.tick(world, lightingEngine, worldRenderer, player, camera.front(),
@@ -371,6 +383,8 @@ int main() {
                         if (const auto action = interaction.takeBlockEntityAction()) {
                             if (action->type == BlockEntityActionType::OpenChest ||
                                 action->type == BlockEntityActionType::OpenShulker ||
+                                action->type == BlockEntityActionType::OpenFurnace ||
+                                action->type == BlockEntityActionType::OpenCraftingTable ||
                                 action->type == BlockEntityActionType::EditSign) {
                                 gameHud.openBlockEntityScreen(*action);
                                 inventoryOpen = true;
@@ -388,7 +402,10 @@ int main() {
                             }
                         }
                     }
-                    blockEntities.tick(world);
+                    for (const glm::ivec3& changed : blockEntities.tick(world)) {
+                        const auto lightingChanges = lightingEngine.blockChangedSync(changed.x, changed.y, changed.z);
+                        worldRenderer.blockChangedSync(changed.x, changed.y, changed.z, lightingChanges);
+                    }
                     itemEntities.tick(world, player);
                     environment.tick(world);
                     // Stage 9 sound events are intentionally hooks only; consume them so
@@ -406,8 +423,9 @@ int main() {
             }
 
             if (player.dead()) { inventoryOpen=false; paused=false; setCursorCaptured(window,false); }
-            camera.setPosition(player.interpolatedEyePosition(
-                paused ? 0.0F : static_cast<float>(accumulator / tickDuration)));
+            const float cameraPartial = paused ? 0.0F : static_cast<float>(accumulator / tickDuration);
+            camera.setPosition(player.interpolatedEyePosition(cameraPartial));
+            camera.setHurtEffect(player.hurtCameraStrength(cameraPartial), player.attackedAtYaw());
 
             const ChunkStreamChanges streamChanges = chunkStreamer.update(
                 player.feetPosition().x, player.feetPosition().z,
@@ -440,7 +458,11 @@ int main() {
             if (framebufferHeight > 0) {
                 const float aspect = static_cast<float>(framebufferWidth) /
                                      static_cast<float>(framebufferHeight);
-                const glm::mat4 projection = glm::perspective(glm::radians(70.0F), aspect, 0.05F, 500.0F);
+                const BlockId cameraBlock = static_cast<BlockId>(blockId(world.getBlock(
+                    static_cast<int>(std::floor(camera.position().x)), static_cast<int>(std::floor(camera.position().y)),
+                    static_cast<int>(std::floor(camera.position().z)))));
+                const bool underwater = cameraBlock == BlockId::Water || cameraBlock == BlockId::FlowingWater;
+                const glm::mat4 projection = glm::perspective(glm::radians(underwater ? 60.0F : 70.0F), aspect, 0.05F, 500.0F);
                 const glm::mat4 view = camera.viewMatrix();
                 environmentRenderer.renderSky(environmentFrame, camera.position(), view, projection);
                 worldRenderer.render(view, projection, environmentFrame);

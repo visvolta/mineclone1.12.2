@@ -24,14 +24,17 @@ enum class RuntimeBlockEntityType : std::uint8_t {
     TrappedChest,
     Sign,
     Bed,
-    ShulkerBox
+    ShulkerBox,
+    Furnace
 };
 
 enum class BlockEntityActionType : std::uint8_t {
     OpenChest,
     EditSign,
     Sleep,
-    OpenShulker
+    OpenShulker,
+    OpenFurnace,
+    OpenCraftingTable
 };
 
 struct BlockEntityAction {
@@ -49,6 +52,11 @@ struct RuntimeBlockEntity {
     float previousAnimation = 0.0F;
     float animation = 0.0F;
     int viewers = 0;
+    int furnaceBurnTime = 0;
+    int currentItemBurnTime = 0;
+    int furnaceCookTime = 0;
+    int furnaceCookTimeTotal = 200;
+    float furnaceStoredXp = 0.0F;
 };
 
 class BlockEntitySystem {
@@ -58,7 +66,7 @@ public:
     void blockChanged(const World& world, const glm::ivec3& position,
                       BlockState oldState, BlockState newState);
     void placedFromItem(const glm::ivec3& position, BlockState state, const ItemStack& stack);
-    void tick(const World& world);
+    [[nodiscard]] std::vector<glm::ivec3> tick(World& world);
     void restore(RuntimeBlockEntity entity);
 
     [[nodiscard]] RuntimeBlockEntity* find(const glm::ivec3& position);
@@ -80,6 +88,10 @@ public:
     [[nodiscard]] const std::array<std::string, 4>* signLines(const glm::ivec3& position) const;
 
     [[nodiscard]] float animation(const glm::ivec3& position, float partialTick) const;
+    [[nodiscard]] bool furnaceBurning(const glm::ivec3& position) const;
+    [[nodiscard]] float furnaceCookProgress(const glm::ivec3& position) const;
+    [[nodiscard]] float furnaceBurnProgress(const glm::ivec3& position) const;
+    float takeFurnaceExperience(const glm::ivec3& position);
 
 private:
     [[nodiscard]] static std::uint64_t key(const glm::ivec3& position);

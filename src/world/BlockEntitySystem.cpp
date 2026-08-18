@@ -7,6 +7,7 @@
 #include "world/Chunk.hpp"
 #include "world/Raycast.hpp"
 #include "save/Nbt.hpp"
+#include "survival/FurnaceRules.hpp"
 #include "world/World.hpp"
 
 namespace {
@@ -58,6 +59,7 @@ std::optional<RuntimeBlockEntityType> BlockEntitySystem::typeFor(BlockState stat
     if (id == BlockId::StandingSign || id == BlockId::WallSign) return RuntimeBlockEntityType::Sign;
     if (id == BlockId::Bed) return RuntimeBlockEntityType::Bed;
     if (isShulker(id)) return RuntimeBlockEntityType::ShulkerBox;
+    if (id == BlockId::Furnace || id == BlockId::LitFurnace) return RuntimeBlockEntityType::Furnace;
     return std::nullopt;
 }
 
@@ -125,6 +127,11 @@ void BlockEntitySystem::scanChunk(const World& world, int chunkX, int chunkZ) {
                 entity->color = static_cast<std::uint8_t>(nbt::integer(c, "color", entity->color) & 15);
             if (entity->type == RuntimeBlockEntityType::ShulkerBox)
                 entity->color = static_cast<std::uint8_t>(nbt::integer(c, "Color", entity->color) & 15);
+            if (entity->type == RuntimeBlockEntityType::Furnace) {
+                entity->furnaceBurnTime = static_cast<int>(nbt::integer(c, "BurnTime", 0));
+                entity->furnaceCookTime = static_cast<int>(nbt::integer(c, "CookTime", 0));
+                entity->furnaceCookTimeTotal = static_cast<int>(nbt::integer(c, "CookTimeTotal", 200));
+            }
             if (const nbt::Tag* items = nbt::find(c, "Items"); items && items->type == nbt::Type::List) {
                 for (const nbt::Tag& item : items->list()) {
                     if (item.type != nbt::Type::Compound) continue;
@@ -140,6 +147,8 @@ void BlockEntitySystem::scanChunk(const World& world, int chunkX, int chunkZ) {
                     entity->inventory[static_cast<std::size_t>(slot)] = std::move(stack);
                 }
             }
+            if (entity->type == RuntimeBlockEntityType::Furnace)
+                entity->currentItemBurnTime = std::max(entity->furnaceBurnTime, FurnaceRules::fuelBurnTime(entity->inventory[1]));
         } catch (...) {
             // Structure-template payloads from earlier stages may not have a
             // named NBT root. They remain preserved by Chunk and are ignored
@@ -208,9 +217,6 @@ std::optional<BlockEntityAction> BlockEntitySystem::activate(const World& world,
                                                              const RaycastHit& hit) const {
     const BlockId id = static_cast<BlockId>(blockId(hit.state));
     if (isChest(id)) {
-        // BlockChest#getContainer rejects a chest when either half has a normal
-        // cube immediately above it. Cats are intentionally absent until the
-        // entity/AI stage, but the block obstruction rule is implemented now.
         const auto blockedAbove = [&](const glm::ivec3& p) {
             return normalCube(world.getBlock(p.x, p.y + 1, p.z));
         };
@@ -222,15 +228,15 @@ std::optional<BlockEntityAction> BlockEntitySystem::activate(const World& world,
     if (id == BlockId::Bed)
         return BlockEntityAction{BlockEntityActionType::Sleep, hit.block};
     if (isShulker(id)) {
-        // A closed shulker may open only when the half-block lid sweep in its
-        // facing direction is unobstructed. With the current block-only world,
-        // a normal cube in the adjacent cell is the relevant obstruction.
         const glm::ivec3 d = facingOffset(blockMetadata(hit.state));
         const glm::ivec3 adjacent = hit.block + d;
-        if (normalCube(world.getBlock(adjacent.x, adjacent.y, adjacent.z)))
-            return std::nullopt;
+        if (normalCube(world.getBlock(adjacent.x, adjacent.y, adjacent.z))) return std::nullopt;
         return BlockEntityAction{BlockEntityActionType::OpenShulker, hit.block};
     }
+    if (id == BlockId::Furnace || id == BlockId::LitFurnace)
+        return BlockEntityAction{BlockEntityActionType::OpenFurnace, hit.block};
+    if (id == BlockId::CraftingTable)
+        return BlockEntityAction{BlockEntityActionType::OpenCraftingTable, hit.block};
     return std::nullopt;
 }
 
@@ -250,24 +256,73 @@ void BlockEntitySystem::endViewing(const BlockEntityAction& action) {
         entity->viewers = std::max(0, entity->viewers - 1);
 }
 
-void BlockEntitySystem::tick(const World&) {
+std::vector<glm::ivec3> BlockEntitySystem::tick(World& world) {
+    std::vector<glm::ivec3> changedBlocks;
     for (auto& [unused, entity] : entities_) {
         (void)unused;
         entity.previousAnimation = entity.animation;
-        if (entity.type == RuntimeBlockEntityType::Chest || entity.type == RuntimeBlockEntityType::TrappedChest) {
+        if (entity.type == RuntimeBlockEntityType::Chest || entity.type == RuntimeBlockEntityType::TrappedChest ||
+            entity.type == RuntimeBlockEntityType::ShulkerBox) {
             if (entity.viewers > 0 && entity.animation < 1.0F) entity.animation += 0.1F;
             else if (entity.viewers == 0 && entity.animation > 0.0F) entity.animation -= 0.1F;
-        } else if (entity.type == RuntimeBlockEntityType::ShulkerBox) {
-            if (entity.viewers > 0 && entity.animation < 1.0F) entity.animation += 0.1F;
-            else if (entity.viewers == 0 && entity.animation > 0.0F) entity.animation -= 0.1F;
+            entity.animation = std::clamp(entity.animation, 0.0F, 1.0F);
+            continue;
         }
-        entity.animation = std::clamp(entity.animation, 0.0F, 1.0F);
+        if (entity.type != RuntimeBlockEntityType::Furnace) continue;
+
+        const bool wasBurning = entity.furnaceBurnTime > 0;
+        if (entity.furnaceBurnTime > 0) --entity.furnaceBurnTime;
+        ItemStack& input = entity.inventory[0];
+        ItemStack& fuel = entity.inventory[1];
+        ItemStack& output = entity.inventory[2];
+        const auto recipe = FurnaceRules::recipe(input);
+        bool canSmelt = false;
+        if (recipe) {
+            canSmelt = output.empty() || (output.sameItem(recipe->result) && output.count < 64);
+        }
+        if (entity.furnaceBurnTime <= 0 && canSmelt && !fuel.empty()) {
+            const int burn = FurnaceRules::fuelBurnTime(fuel);
+            if (burn > 0) {
+                entity.furnaceBurnTime = burn; entity.currentItemBurnTime = burn;
+                const bool lavaBucket = fuel.itemId == 327;
+                fuel.shrink(1);
+                if (lavaBucket && fuel.empty()) fuel = ItemStack{325,1,0,{}};
+            }
+        }
+        if (entity.furnaceBurnTime > 0 && canSmelt && recipe) {
+            ++entity.furnaceCookTime;
+            if (entity.furnaceCookTime >= entity.furnaceCookTimeTotal) {
+                entity.furnaceCookTime = 0;
+                if (output.empty()) output = recipe->result; else ++output.count;
+                entity.furnaceStoredXp += recipe->experience;
+                const bool wetSponge = input.itemId == 19 && input.damage == 1;
+                input.shrink(1);
+                if (wetSponge && fuel.itemId == 325 && fuel.count == 1) fuel = ItemStack{326,1,0,{}};
+            }
+        } else if (entity.furnaceBurnTime <= 0 && entity.furnaceCookTime > 0) {
+            entity.furnaceCookTime = std::clamp(entity.furnaceCookTime - 2, 0, entity.furnaceCookTimeTotal);
+        } else if (!canSmelt) {
+            entity.furnaceCookTime = 0;
+        }
+
+        const bool burning = entity.furnaceBurnTime > 0;
+        if (burning != wasBurning) {
+            const BlockState current = world.getBlock(entity.position.x,entity.position.y,entity.position.z);
+            const std::uint8_t meta = blockMetadata(current);
+            const BlockId wanted = burning ? BlockId::LitFurnace : BlockId::Furnace;
+            world.setBlock(entity.position.x,entity.position.y,entity.position.z,
+                           makeBlockState(static_cast<std::uint16_t>(wanted),meta));
+            entity.state = makeBlockState(static_cast<std::uint16_t>(wanted),meta);
+            changedBlocks.push_back(entity.position);
+        }
     }
+    return changedBlocks;
 }
 
 int BlockEntitySystem::containerSlotCount(const World& world, const glm::ivec3& position) const {
     const RuntimeBlockEntity* entity = find(position);
     if (entity == nullptr) return 0;
+    if (entity->type == RuntimeBlockEntityType::Furnace) return 3;
     if (entity->type == RuntimeBlockEntityType::ShulkerBox) return 27;
     if (entity->type == RuntimeBlockEntityType::Chest || entity->type == RuntimeBlockEntityType::TrappedChest)
         return pairedChest(world, position) ? 54 : 27;
@@ -278,6 +333,10 @@ ItemStack& BlockEntitySystem::containerSlot(const World& world, const glm::ivec3
     RuntimeBlockEntity* clicked = find(position);
     if (clicked == nullptr) throw std::out_of_range("Block entity container is missing");
     if (index < 0) throw std::out_of_range("Negative container slot");
+    if (clicked->type == RuntimeBlockEntityType::Furnace) {
+        if (index >= 3) throw std::out_of_range("Container slot outside furnace");
+        return clicked->inventory[static_cast<std::size_t>(index)];
+    }
     if (clicked->type == RuntimeBlockEntityType::ShulkerBox) {
         if (index >= 27) throw std::out_of_range("Container slot outside shulker box");
         return clicked->inventory[static_cast<std::size_t>(index)];
@@ -308,6 +367,7 @@ const ItemStack& BlockEntitySystem::containerSlot(const World& world, const glm:
 std::string BlockEntitySystem::containerTitle(const World& world, const glm::ivec3& position) const {
     const RuntimeBlockEntity* entity = find(position);
     if (entity == nullptr) return "Container";
+    if (entity->type == RuntimeBlockEntityType::Furnace) return "Furnace";
     if (entity->type == RuntimeBlockEntityType::ShulkerBox) return "Shulker Box";
     if (entity->type == RuntimeBlockEntityType::TrappedChest)
         return pairedChest(world, position) ? "Large Trapped Chest" : "Trapped Chest";
@@ -330,4 +390,21 @@ float BlockEntitySystem::animation(const glm::ivec3& position, float partialTick
     const RuntimeBlockEntity* entity = find(position);
     if (entity == nullptr) return 0.0F;
     return entity->previousAnimation + (entity->animation - entity->previousAnimation) * partialTick;
+}
+
+
+bool BlockEntitySystem::furnaceBurning(const glm::ivec3& position) const {
+    const RuntimeBlockEntity* e=find(position); return e && e->type==RuntimeBlockEntityType::Furnace && e->furnaceBurnTime>0;
+}
+float BlockEntitySystem::furnaceCookProgress(const glm::ivec3& position) const {
+    const RuntimeBlockEntity* e=find(position); if(!e||e->type!=RuntimeBlockEntityType::Furnace||e->furnaceCookTimeTotal<=0)return 0.0F;
+    return std::clamp(static_cast<float>(e->furnaceCookTime)/static_cast<float>(e->furnaceCookTimeTotal),0.0F,1.0F);
+}
+float BlockEntitySystem::furnaceBurnProgress(const glm::ivec3& position) const {
+    const RuntimeBlockEntity* e=find(position); if(!e||e->type!=RuntimeBlockEntityType::Furnace||e->currentItemBurnTime<=0)return 0.0F;
+    return std::clamp(static_cast<float>(e->furnaceBurnTime)/static_cast<float>(e->currentItemBurnTime),0.0F,1.0F);
+}
+float BlockEntitySystem::takeFurnaceExperience(const glm::ivec3& position) {
+    RuntimeBlockEntity* e=find(position); if(!e||e->type!=RuntimeBlockEntityType::Furnace)return 0.0F;
+    const float xp=e->furnaceStoredXp; e->furnaceStoredXp=0.0F; return xp;
 }

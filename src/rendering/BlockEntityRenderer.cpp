@@ -178,6 +178,7 @@ void BlockEntityRenderer::render(const World& world,const glm::mat4& view,const 
             case RuntimeBlockEntityType::Sign: renderSign(world,e,identity); break;
             case RuntimeBlockEntityType::Bed: renderBed(world,e,identity); break;
             case RuntimeBlockEntityType::ShulkerBox: renderShulker(world,e,identity,partialTick); break;
+            case RuntimeBlockEntityType::Furnace: break; // furnace is a normal JSON block model
         }
     }
     glEnable(GL_CULL_FACE);

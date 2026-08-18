@@ -122,6 +122,6 @@ int main() {
     testChunkStorage();
 
     std::filesystem::remove_all(root, error);
-    std::cout << "Stage 8 save format tests passed.\n";
+    std::cout << "Persistence tests passed.\n";
     return 0;
 }

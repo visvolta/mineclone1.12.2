@@ -52,6 +52,13 @@ struct LoadedPlayerState {
     float health = 20.0F;
     int air = 300;
     int fireTicks = 0;
+    int foodLevel = 20;
+    float foodSaturationLevel = 5.0F;
+    float foodExhaustionLevel = 0.0F;
+    int foodTickTimer = 0;
+    int experienceTotal = 0;
+    int experienceLevel = 0;
+    float experienceProgress = 0.0F;
 };
 
 class WorldSave {

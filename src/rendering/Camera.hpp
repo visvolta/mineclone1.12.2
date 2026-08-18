@@ -13,6 +13,7 @@ public:
     [[nodiscard]] float pitch() const { return pitch_; }
 
     void setPosition(const glm::vec3& position) { position_ = position; }
+    void setHurtEffect(float strengthDegrees, float attackedAtYaw) { hurtStrengthDegrees_ = strengthDegrees; attackedAtYaw_ = attackedAtYaw; }
     void look(float xOffset, float yOffset);
 
 private:
@@ -27,4 +28,6 @@ private:
     float yaw_ = -90.0F;
     float pitch_ = 0.0F;
     float mouseSensitivity_ = 0.10F;
+    float hurtStrengthDegrees_ = 0.0F;
+    float attackedAtYaw_ = 0.0F;
 };

@@ -204,6 +204,26 @@ void DebugRenderer::renderBreakOverlay(const World& world, const std::optional<R
                                        const glm::mat4& projection) {
     if (!hit || progress <= 0.0F) return;
     const BlockRenderPath renderPath = blockRenderPath(hit->state);
+    if (renderPath == BlockRenderPath::BlockEntityRenderer) {
+        const auto bounds = BlockShapes::selectionBounds(world, hit->state, hit->block.x, hit->block.y, hit->block.z);
+        if (!bounds) return;
+        const float x0=static_cast<float>(hit->block.x+bounds->minX)-0.001F;
+        const float y0=static_cast<float>(hit->block.y+bounds->minY)-0.001F;
+        const float z0=static_cast<float>(hit->block.z+bounds->minZ)-0.001F;
+        const float x1=static_cast<float>(hit->block.x+bounds->maxX)+0.001F;
+        const float y1=static_cast<float>(hit->block.y+bounds->maxY)+0.001F;
+        const float z1=static_cast<float>(hit->block.z+bounds->maxZ)+0.001F;
+        struct P{float x,y,z,u,v,s;}; std::vector<P> verts; verts.reserve(36);
+        const auto q=[&](std::array<glm::vec3,4> p,float shade){constexpr int ix[6]={0,1,2,0,2,3};constexpr glm::vec2 uv[4]={{0,1},{1,1},{1,0},{0,0}};for(int i:ix)verts.push_back({p[i].x,p[i].y,p[i].z,uv[i].x,uv[i].y,shade});};
+        q({glm::vec3{x0,y0,z1},glm::vec3{x1,y0,z1},glm::vec3{x1,y1,z1},glm::vec3{x0,y1,z1}},0.8F);
+        q({glm::vec3{x1,y0,z0},glm::vec3{x0,y0,z0},glm::vec3{x0,y1,z0},glm::vec3{x1,y1,z0}},0.8F);
+        q({glm::vec3{x0,y0,z0},glm::vec3{x0,y0,z1},glm::vec3{x0,y1,z1},glm::vec3{x0,y1,z0}},0.6F);
+        q({glm::vec3{x1,y0,z1},glm::vec3{x1,y0,z0},glm::vec3{x1,y1,z0},glm::vec3{x1,y1,z1}},0.6F);
+        q({glm::vec3{x0,y1,z1},glm::vec3{x1,y1,z1},glm::vec3{x1,y1,z0},glm::vec3{x0,y1,z0}},1.0F);
+        q({glm::vec3{x0,y0,z0},glm::vec3{x1,y0,z0},glm::vec3{x1,y0,z1},glm::vec3{x0,y0,z1}},0.5F);
+        const int stage=std::clamp(static_cast<int>(progress*10.0F),0,9);
+        overlayShader_.use();overlayShader_.setMat4("transform",projection*view);overlayShader_.setInt("damageTexture",0);glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,destroyTextures_[static_cast<std::size_t>(stage)]);glBindVertexArray(overlayVao_);glBindBuffer(GL_ARRAY_BUFFER,overlayVbo_);glBufferData(GL_ARRAY_BUFFER,static_cast<GLsizeiptr>(verts.size()*sizeof(P)),verts.data(),GL_DYNAMIC_DRAW);glEnable(GL_BLEND);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);glEnable(GL_POLYGON_OFFSET_FILL);glPolygonOffset(-1.0F,-10.0F);glDepthMask(GL_FALSE);glDrawArrays(GL_TRIANGLES,0,static_cast<GLsizei>(verts.size()));glDepthMask(GL_TRUE);glDisable(GL_POLYGON_OFFSET_FILL);glDisable(GL_BLEND);return;
+    }
     if (renderPath != BlockRenderPath::JsonModel &&
         renderPath != BlockRenderPath::StaticCustomRenderer) return;
 
@@ -252,7 +272,7 @@ void DebugRenderer::renderBreakOverlay(const World& world, const std::optional<R
         if (currentId == BlockId::StainedGlass && neighborId == BlockId::StainedGlass &&
             blockMetadata(hit->state) == blockMetadata(neighbor)) return true;
         if (currentId == BlockId::Ice && neighborId == BlockId::Ice) return true;
-        return BlockRegistry::get(neighbor).opaque;
+        return BlockRegistry::get(neighbor).opaque && BlockRegistry::get(neighbor).fullCube;
     };
 
     std::vector<float> vertices;

@@ -10,7 +10,13 @@ Camera::Camera(glm::vec3 position) : position_(position) {
 }
 
 glm::mat4 Camera::viewMatrix() const {
-    return glm::lookAt(position_, position_ + front_, up_);
+    glm::mat4 hurt(1.0F);
+    if (std::abs(hurtStrengthDegrees_) > 1.0e-5F) {
+        hurt = glm::rotate(hurt, glm::radians(-attackedAtYaw_), glm::vec3(0.0F, 1.0F, 0.0F));
+        hurt = glm::rotate(hurt, glm::radians(-hurtStrengthDegrees_), glm::vec3(0.0F, 0.0F, 1.0F));
+        hurt = glm::rotate(hurt, glm::radians(attackedAtYaw_), glm::vec3(0.0F, 1.0F, 0.0F));
+    }
+    return hurt * glm::lookAt(position_, position_ + front_, up_);
 }
 
 void Camera::look(float xOffset, float yOffset) {

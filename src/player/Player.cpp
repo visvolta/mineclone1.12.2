@@ -220,12 +220,15 @@ void Player::moveWithCollisions(const World& world, double x, double y, double z
 }
 
 void Player::tick(const World& world, const PlayerInput& input, const glm::vec3& lookDirection) {
+    ++ticksExisted_;
     previousPosition_ = position_;
+    if (hurtTime_ > 0) --hurtTime_;
     if (hurtResistantTime_ > 0) --hurtResistantTime_;
     if (flyToggleTimer_ > 0) --flyToggleTimer_;
 
     if (dead_) {
         velocity_ *= 0.8;
+        usingItem_ = false; itemUseTicks_ = 0;
         return;
     }
 
@@ -255,6 +258,7 @@ void Player::tick(const World& world, const PlayerInput& input, const glm::vec3&
     } else {
         if (input.jump && onGround_) {
             velocity_.y = 0.42F;
+            if (gameMode_ == GameMode::Survival) foodStats_.addExhaustion(input.sprint ? 0.8F : 0.2F);
             if (input.sprint) {
                 glm::vec2 forwardFlat(lookDirection.x, lookDirection.z);
                 if (glm::dot(forwardFlat, forwardFlat) > 1.0e-6F) {
@@ -277,7 +281,11 @@ void Player::tick(const World& world, const PlayerInput& input, const glm::vec3&
             fallDistance_ = 0.0F;
         }
         velocity_.y -= gravity; velocity_.y *= verticalDrag; velocity_.x *= friction; velocity_.z *= friction;
+        const double dx = position_.x - previousPosition_.x; const double dz = position_.z - previousPosition_.z;
+        const float horizontal = static_cast<float>(std::sqrt(dx*dx + dz*dz));
+        if (onGround_ && horizontal > 0.0F) foodStats_.addExhaustion(horizontal * (input.sprint ? 0.1F : 0.01F));
     }
+    tickItemUse(input.useItem);
     tickSurvival(world);
 }
 
@@ -305,17 +313,65 @@ bool Player::hurt(float amount, DamageType type) {
     }
     health_=std::max(0.0F,health_-applied);
     hurtResistantTime_=20;
+    hurtTime_=maxHurtTime_;
     if (health_<=0.0F) { health_=0.0F; dead_=true; velocity_=glm::dvec3(0.0); flying_=false; }
     return true;
 }
 
-void Player::restoreSurvival(float health, int air, int fireTicks, bool dead) {
+void Player::restoreSurvival(float health, int air, int fireTicks, bool dead,
+                             int foodLevel, float saturation, float exhaustion,
+                             int experienceTotal, int experienceLevel, float experienceProgress) {
     health_=std::clamp(health,0.0F,20.0F); air_=std::clamp(air,-20,300); fireTicks_=std::max(0,fireTicks); dead_=dead||health_<=0.0F;
+    foodStats_.restore(foodLevel, saturation, exhaustion);
+    experienceTotal_ = std::max(0, experienceTotal);
+    experienceLevel_ = std::max(0, experienceLevel);
+    experienceProgress_ = std::clamp(experienceProgress, 0.0F, 1.0F);
 }
 
 void Player::respawn() {
     position_=respawnPosition_; previousPosition_=position_; velocity_=glm::dvec3(0.0); health_=20.0F; air_=300; fireTicks_=0;
-    hurtResistantTime_=0; fireDamageTicker_=0; fallDistance_=0.0F; dead_=false; onGround_=false; flying_=false;
+    hurtResistantTime_=0; hurtTime_=0; fireDamageTicker_=0; fallDistance_=0.0F; dead_=false; onGround_=false; flying_=false;
+    foodStats_.restore(20,5.0F,0.0F); usingItem_=false; itemUseTicks_=0;
+}
+
+float Player::hurtCameraStrength(float partialTick) const {
+    float remaining = static_cast<float>(hurtTime_) - partialTick;
+    if (remaining <= 0.0F || maxHurtTime_ <= 0) return 0.0F;
+    float f = remaining / static_cast<float>(maxHurtTime_);
+    f *= f; f *= f;
+    return std::max(0.0F, std::sin(f * 3.14159265358979323846F)) * 14.0F;
+}
+
+float Player::itemUseProgress(float partialTick) const {
+    if (!usingItem_) return 0.0F;
+    return std::clamp((static_cast<float>(itemUseTicks_) + partialTick) / 32.0F, 0.0F, 1.0F);
+}
+
+void Player::heal(float amount) {
+    if (amount > 0.0F && !dead_) health_ = std::min(20.0F, health_ + amount);
+}
+
+void Player::addExperience(int amount) {
+    if (amount <= 0) return;
+    experienceTotal_ += amount;
+    auto cap=[](int level){ return level >= 30 ? 112 + (level-30)*9 : level >= 15 ? 37 + (level-15)*5 : 7 + level*2; };
+    float points = experienceProgress_ * static_cast<float>(cap(experienceLevel_)) + static_cast<float>(amount);
+    while (points >= cap(experienceLevel_)) { points -= static_cast<float>(cap(experienceLevel_)); ++experienceLevel_; }
+    experienceProgress_ = points / static_cast<float>(cap(experienceLevel_));
+}
+
+void Player::tickItemUse(bool useHeldItem) {
+    ItemStack& held = inventory_.selected();
+    const FoodProperties food = foodProperties(held.itemId, held.damage);
+    const bool edible = food.hunger > 0 && (food.alwaysEdible || foodStats_.needsFood());
+    if (!useHeldItem || !edible || held.empty()) { usingItem_=false; itemUseTicks_=0; usingItemId_=0; return; }
+    if (!usingItem_ || usingItemId_ != held.itemId) { usingItem_=true; itemUseTicks_=0; usingItemId_=held.itemId; }
+    ++itemUseTicks_;
+    if (itemUseTicks_ >= 32) {
+        foodStats_.addStats(food.hunger, food.saturationModifier);
+        if (gameMode_ != GameMode::Creative) held.shrink(1);
+        usingItem_=false; itemUseTicks_=0; usingItemId_=0;
+    }
 }
 
 void Player::tickSurvival(const World& world) {
@@ -340,5 +396,11 @@ void Player::tickSurvival(const World& world) {
     if(submerged) fireTicks_=0;
     if(fireTicks_>0){ --fireTicks_; if(++fireDamageTicker_>=20){fireDamageTicker_=0;hurt(1.0F,DamageType::Fire);} }
     else fireDamageTicker_=0;
+
+    foodStats_.tick(health_ < 20.0F, health_, true);
+    const float pendingHeal = foodStats_.consumePendingHeal();
+    if (pendingHeal > 0.0F) heal(pendingHeal);
+    const float starve = foodStats_.consumePendingStarveDamage();
+    if (starve > 0.0F) hurt(starve, DamageType::Starve);
 }
 
