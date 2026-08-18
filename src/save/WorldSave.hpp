@@ -16,6 +16,7 @@
 class BlockEntitySystem;
 class Chunk;
 class Environment;
+class EntityManager;
 class ItemRegistry;
 class World;
 
@@ -73,9 +74,10 @@ public:
                    const BlockEntitySystem* blockEntities = nullptr);
 
     [[nodiscard]] std::unique_ptr<Chunk> loadChunk(int chunkX, int chunkZ) const;
-    void saveChunk(const Chunk& chunk, const BlockEntitySystem& blockEntities);
+    void saveChunk(const Chunk& chunk, const BlockEntitySystem& blockEntities, const EntityManager* entities = nullptr);
     void saveAll(const World& world, const BlockEntitySystem& blockEntities,
-                 const WorldConfig& config, const Player& player, const Environment& environment);
+                 const WorldConfig& config, const Player& player, const Environment& environment,
+                 const EntityManager* entities = nullptr);
 
     [[nodiscard]] static std::vector<WorldSummary> listWorlds(const std::filesystem::path& savesRoot);
     [[nodiscard]] static std::filesystem::path createWorld(const std::filesystem::path& savesRoot,
@@ -86,7 +88,8 @@ public:
 private:
     [[nodiscard]] std::filesystem::path regionPath(int chunkX, int chunkZ) const;
     [[nodiscard]] nbt::Document chunkDocument(const Chunk& chunk,
-                                              const BlockEntitySystem& blockEntities) const;
+                                              const BlockEntitySystem& blockEntities,
+                                              const EntityManager* entities) const;
     [[nodiscard]] std::unique_ptr<Chunk> chunkFromDocument(const nbt::Document& document) const;
     [[nodiscard]] nbt::Tag itemStackTag(const ItemStack& stack, int slot) const;
     [[nodiscard]] ItemStack itemStackFromTag(const nbt::Compound& compound) const;

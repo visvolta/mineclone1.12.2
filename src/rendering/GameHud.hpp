@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <glad/gl.h>
+#include <glm/vec3.hpp>
 
 #include "items/ItemRegistry.hpp"
 #include "crafting/CraftingSystem.hpp"
@@ -26,6 +27,7 @@ class World;
 class WorldRenderer;
 class ChunkStreamer;
 struct WorldConfig;
+struct ExperienceDrop { glm::dvec3 position{0.0}; int value = 0; };
 
 class GameHud {
 public:
@@ -49,6 +51,7 @@ public:
     void closeBlockEntityScreen(Player* player = nullptr);
     void closePlayerCrafting(Player& player);
     [[nodiscard]] std::vector<ItemStack> takeCraftingDrops();
+    [[nodiscard]] std::vector<ExperienceDrop> takeExperienceDrops();
     [[nodiscard]] bool hasBlockEntityScreen() const { return activeBlockEntityAction_.has_value(); }
     bool consumeScreenCloseRequest() { const bool value=screenCloseRequested_; screenCloseRequested_=false; return value; }
     bool consumeResumeRequest() { const bool value=resumeRequested_; resumeRequested_=false; return value; }
@@ -84,6 +87,7 @@ private:
     void renderContainerScreen(const World& world, Player& player, int scaledWidth, int scaledHeight, int scaleFactor);
     void renderFurnaceScreen(const World& world, Player& player, int scaledWidth, int scaledHeight, int scaleFactor);
     void renderHopperScreen(const World& world, Player& player, int scaledWidth, int scaledHeight, int scaleFactor);
+    void renderDispenserScreen(const World& world, Player& player, int scaledWidth, int scaledHeight, int scaleFactor);
     void renderBrewingScreen(const World& world, Player& player, int scaledWidth, int scaledHeight, int scaleFactor);
     void renderEnchantingScreen(const World& world, Player& player, int scaledWidth, int scaledHeight, int scaleFactor);
     void renderBeaconScreen(const World& world, Player& player, int scaledWidth, int scaledHeight, int scaleFactor);
@@ -119,6 +123,7 @@ private:
     GLuint craftingTableTexture_ = 0;
     GLuint furnaceTexture_ = 0;
     GLuint hopperTexture_ = 0;
+    GLuint dispenserTexture_ = 0;
     GLuint brewingTexture_ = 0;
     GLuint enchantingTexture_ = 0;
     GLuint beaconTexture_ = 0;
@@ -148,4 +153,5 @@ private:
     bool respawnRequested_ = false;
     bool frameHostOpen_ = false;
     std::vector<ItemStack> pendingCraftingDrops_{};
+    std::vector<ExperienceDrop> experienceDrops_{};
 };

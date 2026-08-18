@@ -14,6 +14,7 @@
 class BlockEntitySystem;
 class Chunk;
 class DynamicBlockSystem;
+class EntityManager;
 class World;
 class WorldSave;
 
@@ -24,7 +25,7 @@ class ChunkStreamer {
 public:
     ChunkStreamer(World& world, const WorldConfig& config, int viewDistance,
                   WorldSave* save = nullptr, BlockEntitySystem* blockEntities = nullptr,
-                  DynamicBlockSystem* dynamicBlocks = nullptr);
+                  DynamicBlockSystem* dynamicBlocks = nullptr, EntityManager* entities = nullptr);
     ~ChunkStreamer();
     ChunkStreamer(const ChunkStreamer&) = delete;
     ChunkStreamer& operator=(const ChunkStreamer&) = delete;
@@ -58,6 +59,7 @@ private:
     WorldSave* save_ = nullptr;
     BlockEntitySystem* blockEntities_ = nullptr;
     DynamicBlockSystem* dynamicBlocks_ = nullptr;
+    EntityManager* entities_ = nullptr;
     std::shared_ptr<int> generatorIdentity_;
     std::shared_ptr<CompletionQueue> completions_;
     ThreadPool workers_;

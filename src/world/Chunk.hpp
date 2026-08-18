@@ -85,6 +85,10 @@ public:
     [[nodiscard]] std::uint8_t biome(int localX, int localZ) const {
         return biomes_[static_cast<std::size_t>((localZ << 4) | localX)];
     }
+
+    void addEntityNbt(std::vector<std::uint8_t> entityNbt) { entityNbt_.push_back(std::move(entityNbt)); }
+    [[nodiscard]] const std::vector<std::vector<std::uint8_t>>& entityNbt() const { return entityNbt_; }
+    [[nodiscard]] std::vector<std::vector<std::uint8_t>> takeEntityNbt() { auto out=std::move(entityNbt_); entityNbt_.clear(); return out; }
     void addBlockEntity(GeneratedBlockEntity entity) { blockEntities_.push_back(std::move(entity)); }
     [[nodiscard]] const std::vector<GeneratedBlockEntity>& blockEntities() const { return blockEntities_; }
 
@@ -113,6 +117,7 @@ private:
     std::array<std::unique_ptr<ChunkSection>, sectionCount> sections_{};
     std::array<std::unique_ptr<ChunkLightSection>, sectionCount> lightSections_{};
     std::array<std::uint8_t, 256> biomes_{};
+    std::vector<std::vector<std::uint8_t>> entityNbt_;
     std::vector<GeneratedBlockEntity> blockEntities_;
     std::vector<std::vector<std::uint8_t>> scheduledTicks_;
     bool lightingReady_ = false;

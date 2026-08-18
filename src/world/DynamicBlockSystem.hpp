@@ -12,6 +12,7 @@
 
 class Chunk;
 class World;
+class EntityManager;
 
 // Stage 11 runtime block ticking.  This intentionally mirrors the two vanilla
 // mechanisms (scheduled ticks + random ticks) instead of giving each feature a
@@ -19,6 +20,7 @@ class World;
 class DynamicBlockSystem {
 public:
     explicit DynamicBlockSystem(std::uint64_t seed = 0);
+    void setEntityManager(EntityManager* entities) { entities_ = entities; }
 
     void schedule(const glm::ivec3& position, BlockState expectedState, int delayTicks, int priority = 0);
     void scanChunk(World& world, int chunkX, int chunkZ);
@@ -78,4 +80,5 @@ private:
     std::mt19937 random_;
     std::uint64_t gameTime_ = 0;
     std::uint64_t sequence_ = 0;
+    EntityManager* entities_ = nullptr;
 };

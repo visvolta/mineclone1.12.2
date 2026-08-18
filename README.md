@@ -50,6 +50,7 @@ The full asset-backed build currently registers focused suites for:
 - rendering models
 - dynamic world ticking
 - functional block entities
+- generic entity world / chunk persistence
 
 ## Source layout
 
@@ -57,6 +58,7 @@ The full asset-backed build currently registers focused suites for:
 - `src/client` — front end and scaled client UI infrastructure
 - `src/core` — JSON and worker/thread infrastructure
 - `src/crafting` — 1.12.2 JSON recipe loading and matching
+- `src/entity` — generic entity base, manager, movement types and entity NBT
 - `src/environment` — total world time, daylight time, weather and fog state
 - `src/items` — item registry and ItemStack data
 - `src/lighting` — skylight and block-light solving
@@ -64,7 +66,7 @@ The full asset-backed build currently registers focused suites for:
 - `src/rendering` — camera, models, meshing, HUD, environment and entity/block-entity rendering
 - `src/save` — NBT, Anvil region files, save migrations and world persistence
 - `src/survival` — mining, food and furnace rules
-- `src/world` — chunks, world storage, dynamic ticks, block entities, dropped items and raycasting
+- `src/world` — chunks, world storage, dynamic ticks, redstone, block entities and raycasting
 - `src/worldgen` — biome, terrain, caves, population, structures and streaming
 - `tests` — focused deterministic regression suites
 
@@ -83,3 +85,8 @@ A single simulation tick is intentionally ordered as:
 9. renderer updates
 
 This ordering is the baseline for the upcoming redstone stage.
+
+
+## Stage 14 entity world
+
+Runtime non-player objects are owned by `EntityManager`. Dropped items, falling blocks, primed TNT, XP orbs, arrows, boats and minecarts share identity, UUIDs, interpolation, chunk membership, ticking and Anvil `Entities` persistence. `ItemEntitySystem` remains only as a compatibility facade for older block/redstone call sites; it no longer owns dropped items.

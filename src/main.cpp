@@ -32,7 +32,7 @@
 #include "rendering/BlockRenderResources.hpp"
 #include "rendering/EnvironmentRenderer.hpp"
 #include "rendering/GameHud.hpp"
-#include "rendering/ItemEntityRenderer.hpp"
+#include "rendering/EntityRenderer.hpp"
 #include "rendering/TextureAtlas.hpp"
 #include "rendering/WorldRenderer.hpp"
 #include "world/Raycast.hpp"
@@ -41,6 +41,7 @@
 #include "world/BlockEntitySystem.hpp"
 #include "world/DynamicBlockSystem.hpp"
 #include "world/ItemEntitySystem.hpp"
+#include "entity/EntityManager.hpp"
 #include "world/RedstoneSystem.hpp"
 #include "worldgen/ChunkStreamer.hpp"
 #include "worldgen/WorldConfig.hpp"
@@ -224,13 +225,15 @@ int main() {
         BlockEntitySystem blockEntities;
         DynamicBlockSystem dynamicBlocks(static_cast<std::uint64_t>(config.seed));
         RedstoneSystem redstone;
-        ItemEntitySystem itemEntities(itemRegistry);
+        EntityManager entities(&itemRegistry);
+        ItemEntitySystem itemEntities(entities);
+        dynamicBlocks.setEntityManager(&entities);
         Player player({0.5, 80.0, 0.5});
         LoadedPlayerState loadedPlayer = worldSave.loadPlayer(player, &blockEntities);
 
         frontEnd->showLoading("Loading world", "Loading biome colours", 22);
         BiomeColors::load(BLOCKCRAFT_ASSET_ROOT);
-        ChunkStreamer chunkStreamer(world, config, config.viewDistance, &worldSave, &blockEntities, &dynamicBlocks);
+        ChunkStreamer chunkStreamer(world, config, config.viewDistance, &worldSave, &blockEntities, &dynamicBlocks, &entities);
         frontEnd->showLoading("Loading world", "Building terrain", 25);
         chunkStreamer.prime(loadedPlayer.position.x, loadedPlayer.position.z, 1,
             [&](float progress) {
@@ -271,7 +274,7 @@ int main() {
         frontEnd.reset();
         GameHud gameHud(window, BLOCKCRAFT_ASSET_ROOT, atlas, itemRegistry, blockRenderResources, blockEntities);
         BlockEntityRenderer blockEntityRenderer(BLOCKCRAFT_ASSET_ROOT, blockEntities);
-        ItemEntityRenderer itemEntityRenderer(BLOCKCRAFT_ASSET_ROOT, itemRegistry, blockRenderResources, atlas);
+        EntityRenderer entityRenderer(BLOCKCRAFT_ASSET_ROOT, itemRegistry, blockRenderResources, atlas);
         BlockInteraction interaction(itemRegistry, blockEntities, itemEntities, dynamicBlocks, redstone);
         camera.setPosition(player.eyePosition());
         setCursorCaptured(window, true);
@@ -434,7 +437,7 @@ int main() {
                     applyWorldChanges(redstone.tick(world, blockEntities, &itemEntities, player, environment.dayTime()), false);
                     applyWorldChanges(dynamicBlocks.tickRandom(world), true);
                     applyWorldChanges(blockEntities.tick(world), true);
-                    itemEntities.tick(world, player);
+                    entities.tick(world, player);
                     environment.tick(world);
                     // Stage 9 sound events are intentionally hooks only; consume them so
                     // a future audio engine can bind exact 1.12.2 SoundType resources without
@@ -497,7 +500,7 @@ int main() {
                 environmentRenderer.renderSky(environmentFrame, camera.position(), view, projection);
                 worldRenderer.render(view, projection, environmentFrame);
                 blockEntityRenderer.render(world, view, projection, partialTick);
-                itemEntityRenderer.render(itemEntities, view, projection, partialTick);
+                entityRenderer.render(entities, view, projection, partialTick);
                 environmentRenderer.renderClouds(environmentFrame, camera.position(), view, projection);
                 environmentRenderer.renderWeather(environmentFrame, world, camera.position(), view, projection);
 
@@ -531,6 +534,8 @@ int main() {
                            lightingEngine, worldRenderer, currentHit,
                            framebufferWidth, framebufferHeight, displayedFps,
                            showDebug, paused, inventoryOpen);
+            for (const ExperienceDrop& drop : gameHud.takeExperienceDrops())
+                if (drop.value > 0) itemEntities.spawnExperience(drop.position, drop.value);
             gameHud.endFrame();
             if (gameHud.consumeScreenCloseRequest()) {
                 inventoryOpen = false;
@@ -566,7 +571,7 @@ int main() {
 
             if (currentTime - lastAutosave >= autosaveIntervalSeconds) {
                 dynamicBlocks.syncLoadedChunkScheduledTicks(world);
-                worldSave.saveAll(world, blockEntities, config, player, environment);
+                worldSave.saveAll(world, blockEntities, config, player, environment, &entities);
                 lastAutosave = currentTime;
             }
 
@@ -585,7 +590,7 @@ int main() {
         // and recently visited terrain survive a clean process restart.
         chunkStreamer.flushCache();
         dynamicBlocks.syncLoadedChunkScheduledTicks(world);
-        worldSave.saveAll(world, blockEntities, config, player, environment);
+        worldSave.saveAll(world, blockEntities, config, player, environment, &entities);
         if (returnToTitle && glfwWindowShouldClose(window) == GLFW_FALSE) {
             setCursorCaptured(window, false);
             glfwSetWindowTitle(window, "Blockcraft 1.12.2");

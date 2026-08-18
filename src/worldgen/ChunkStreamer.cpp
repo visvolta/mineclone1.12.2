@@ -14,6 +14,7 @@
 #include "save/WorldSave.hpp"
 #include "world/BlockEntitySystem.hpp"
 #include "world/DynamicBlockSystem.hpp"
+#include "entity/EntityManager.hpp"
 #include "world/World.hpp"
 #include "worldgen/FlatGeneratorSettings.hpp"
 #include "worldgen/StructureGenerator.hpp"
@@ -93,10 +94,10 @@ std::uint64_t ChunkStreamer::key(int chunkX, int chunkZ) {
 
 ChunkStreamer::ChunkStreamer(World& world, const WorldConfig& config, int viewDistance,
                              WorldSave* save, BlockEntitySystem* blockEntities,
-                             DynamicBlockSystem* dynamicBlocks)
+                             DynamicBlockSystem* dynamicBlocks, EntityManager* entities)
     : world_(world), config_(config), viewDistance_(viewDistance),
       cacheCapacity_(static_cast<std::size_t>(config.chunkCacheCapacity)),
-      save_(save), blockEntities_(blockEntities), dynamicBlocks_(dynamicBlocks),
+      save_(save), blockEntities_(blockEntities), dynamicBlocks_(dynamicBlocks), entities_(entities),
       generatorIdentity_(std::make_shared<int>(0)),
       completions_(std::make_shared<CompletionQueue>()),
       workers_(ThreadPool::recommendedWorkerCount()) {}
@@ -125,6 +126,7 @@ bool ChunkStreamer::tryLoadSaved(int chunkX, int chunkZ, bool active,
     if (!chunk) return false;
 
     if (active) {
+        if (entities_ != nullptr) entities_->restoreChunk(*chunk);
         world_.insertChunk(std::move(chunk));
         if (changes != nullptr) changes->loaded.push_back({chunkX, chunkZ});
     } else {
@@ -240,7 +242,7 @@ void ChunkStreamer::trimCache() {
         if (save_ != nullptr && blockEntities_ != nullptr && oldest->second.chunk) {
             try {
                 if (dynamicBlocks_ != nullptr) dynamicBlocks_->syncChunkScheduledTicks(*oldest->second.chunk);
-                save_->saveChunk(*oldest->second.chunk, *blockEntities_);
+                save_->saveChunk(*oldest->second.chunk, *blockEntities_, entities_);
                 diskChecked_.erase(oldest->first);
             } catch (...) {
             }
@@ -254,7 +256,7 @@ void ChunkStreamer::flushCache() {
     for (auto& [chunkKey, entry] : cache_) {
         if (!entry.chunk) continue;
         if (dynamicBlocks_ != nullptr) dynamicBlocks_->syncChunkScheduledTicks(*entry.chunk);
-        save_->saveChunk(*entry.chunk, *blockEntities_);
+        save_->saveChunk(*entry.chunk, *blockEntities_, entities_);
         diskChecked_.erase(chunkKey);
     }
     // flushCache is a world-close operation. Releasing the entries here also
@@ -320,7 +322,9 @@ ChunkStreamChanges ChunkStreamer::update(double playerX, double playerZ,
     }
     for (const ChunkCoordinate coordinate : outside) {
         if (!withinBudget()) break;
-        cacheChunk(world_.extractChunk(coordinate.x, coordinate.z));
+        auto leaving = world_.extractChunk(coordinate.x, coordinate.z);
+        if (leaving && entities_ != nullptr) entities_->detachChunk(*leaving);
+        cacheChunk(std::move(leaving));
         changes.unloaded.push_back(coordinate);
     }
 
@@ -347,6 +351,7 @@ ChunkStreamChanges ChunkStreamer::update(double playerX, double playerZ,
     for (const ChunkCoordinate coordinate : cachedCandidates) {
         if (!withinBudget()) break;
         auto iterator = cache_.find(key(coordinate.x, coordinate.z));
+        if (iterator->second.chunk && entities_ != nullptr) entities_->restoreChunk(*iterator->second.chunk);
         world_.insertChunk(std::move(iterator->second.chunk));
         cache_.erase(iterator);
         changes.loaded.push_back(coordinate);

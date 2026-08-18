@@ -4,6 +4,7 @@
 #include <cmath>
 #include <vector>
 #include <array>
+#include <glm/geometric.hpp>
 
 #include "blocks/BlockRegistry.hpp"
 #include "items/ItemRegistry.hpp"
@@ -60,6 +61,21 @@ void BlockInteraction::tick(World& world,LightingEngine& lighting,WorldRenderer&
     if(useDelay_>0)--useDelay_; if(attackDelay_>0)--attackDelay_;
     const float reach=player.gameMode()==GameMode::Creative?5.0F:4.5F;
     const auto hit=raycastBlocks(world,player.eyePosition(),look,reach);
+    const auto fireBow = [&]() -> bool {
+        ItemStack& held=player.inventory().selected();
+        if(held.itemId!=261) return false;
+        bool hasArrow=player.gameMode()==GameMode::Creative;
+        std::size_t arrowSlot=PlayerInventory::mainSize;
+        if(!hasArrow) for(std::size_t i=0;i<PlayerInventory::mainSize;++i) if(player.inventory().slot(i).itemId==262&&!player.inventory().slot(i).empty()){hasArrow=true;arrowSlot=i;break;}
+        if(!hasArrow) return false;
+        const glm::dvec3 dir=glm::normalize(glm::dvec3(look));
+        itemEntities_.spawnArrow(glm::dvec3(player.eyePosition())+dir*0.25,dir*3.0);
+        if(player.gameMode()!=GameMode::Creative&&arrowSlot<PlayerInventory::mainSize) player.inventory().slot(arrowSlot).shrink(1);
+        useDelay_=8;
+        return true;
+    };
+
+    if(usingBlock&&useDelay_==0&&!hit) static_cast<void>(fireBow());
 
     if(usingBlock&&useDelay_==0&&hit){
         ItemStack specialEjected;
@@ -69,9 +85,23 @@ void BlockInteraction::tick(World& world,LightingEngine& lighting,WorldRenderer&
         }
         else if(const auto action=blockEntities_.activate(world,*hit)){pendingBlockEntityAction_=action;useDelay_=4;}
         else if(const auto activation=placement_.activation(world,player,look,*hit)){applyPlan(world,lighting,renderer,*activation);useDelay_=4;}
-        else {ItemStack& held=player.inventory().selected();const ItemStack placed=held;if(const auto plan=placement_.placement(world,player,look,*hit,held)){
-            applyPlan(world,lighting,renderer,*plan);for(const auto& e:plan->changes){blockEntities_.placedFromItem(e.position,e.state,placed);const BlockId id=static_cast<BlockId>(blockId(e.state));if((id==BlockId::StandingSign||id==BlockId::WallSign)&&!pendingBlockEntityAction_)pendingBlockEntityAction_=BlockEntityAction{BlockEntityActionType::EditSign,e.position};}
-            if(plan->consumeItem&&player.gameMode()!=GameMode::Creative)held.shrink(1);useDelay_=4;}}
+        else {
+            ItemStack& held=player.inventory().selected();
+            const BlockId targetId=static_cast<BlockId>(blockId(hit->state));
+            bool entityUse=false;
+            if(held.itemId==333 && (targetId==BlockId::Water||targetId==BlockId::FlowingWater)){
+                itemEntities_.spawnBoat(glm::dvec3(hit->block)+glm::dvec3(0.5,0.65,0.5),static_cast<int>(held.damage));
+                if(player.gameMode()!=GameMode::Creative)held.shrink(1); useDelay_=4; entityUse=true;
+            } else if(held.itemId==328 && (targetId==BlockId::Rail||targetId==BlockId::GoldenRail||targetId==BlockId::DetectorRail||targetId==BlockId::ActivatorRail)){
+                itemEntities_.spawnMinecart(glm::dvec3(hit->block)+glm::dvec3(0.5,0.1,0.5));
+                if(player.gameMode()!=GameMode::Creative)held.shrink(1); useDelay_=4; entityUse=true;
+} else if(held.itemId==261 && fireBow()){
+                entityUse=true;
+            }
+            if(!entityUse){const ItemStack placed=held;if(const auto plan=placement_.placement(world,player,look,*hit,held)){
+                applyPlan(world,lighting,renderer,*plan);for(const auto& e:plan->changes){blockEntities_.placedFromItem(e.position,e.state,placed);const BlockId id=static_cast<BlockId>(blockId(e.state));if((id==BlockId::StandingSign||id==BlockId::WallSign)&&!pendingBlockEntityAction_)pendingBlockEntityAction_=BlockEntityAction{BlockEntityActionType::EditSign,e.position};}
+                if(plan->consumeItem&&player.gameMode()!=GameMode::Creative)held.shrink(1);useDelay_=4;}}
+        }
     }
 
     if(!attacking||!hit||player.dead()){breakingBlock_.reset();breakingItem_.clear();breakProgress_=0;stepSoundTickCounter_=0;return;}

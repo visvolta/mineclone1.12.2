@@ -1,43 +1,25 @@
 #pragma once
 
-#include <cstdint>
 #include <vector>
-
 #include <glm/vec3.hpp>
-
 #include "items/ItemStack.hpp"
+#include "entity/Entity.hpp"
 
-class ItemRegistry;
-class Player;
-class World;
+class EntityManager;
 
-struct ItemEntity {
-    std::uint64_t id = 0;
-    ItemStack stack{};
-    glm::dvec3 position = glm::dvec3(0.0);
-    glm::dvec3 previousPosition = glm::dvec3(0.0);
-    glm::dvec3 velocity = glm::dvec3(0.0);
-    int age = 0;
-    int pickupDelay = 10;
-    int health = 5;
-    float hoverStart = 0.0F;
-    float rotationYaw = 0.0F;
-    bool onGround = false;
-    bool inWater = false;
-    bool removed = false;
-};
+using ItemEntity = EntityItem;
 
+// Compatibility facade retained for block interaction/redstone call sites.
+// Stage 14 moved ownership/ticking/persistence to EntityManager/EntityItem.
 class ItemEntitySystem {
 public:
-    explicit ItemEntitySystem(const ItemRegistry& items) : items_(items) {}
+    explicit ItemEntitySystem(EntityManager& entities) : entities_(entities) {}
     void spawn(ItemStack stack, glm::dvec3 position, glm::dvec3 velocity = glm::dvec3(0.0));
-    void tick(const World& world, Player& player);
-    void clearRemoved();
-    [[nodiscard]] const std::vector<ItemEntity>& entities() const { return entities_; }
-
+    void spawnArrow(glm::dvec3 position, glm::dvec3 velocity);
+    void spawnBoat(glm::dvec3 position, int type = 0);
+    void spawnMinecart(glm::dvec3 position, int type = 0);
+    void spawnExperience(glm::dvec3 position, int value);
+    [[nodiscard]] std::vector<ItemEntity> entities() const;
 private:
-    void mergeNearby();
-    const ItemRegistry& items_;
-    std::uint64_t nextId_ = 1;
-    std::vector<ItemEntity> entities_;
+    EntityManager& entities_;
 };

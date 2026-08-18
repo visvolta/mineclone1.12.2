@@ -8,6 +8,7 @@
 #include <string_view>
 
 #include "blocks/BlockRegistry.hpp"
+#include "entity/EntityManager.hpp"
 #include "save/Nbt.hpp"
 #include "world/Chunk.hpp"
 #include "world/World.hpp"
@@ -146,10 +147,10 @@ void DynamicBlockSystem::tickFluid(World& world,const glm::ivec3& p,BlockState s
 }
 
 void DynamicBlockSystem::tickFalling(World& world,const glm::ivec3& p,BlockState state,std::vector<glm::ivec3>& changed){
-    if (p.y <= 0) return;
-    glm::ivec3 dest = p;
-    while (dest.y > 0 && canReplace(world.getBlock(dest.x, dest.y - 1, dest.z))) --dest.y;
-    if(dest.y!=p.y){ set(world,p,makeBlockState(0),changed); set(world,dest,state,changed); }
+    if (p.y <= 0 || !canReplace(world.getBlock(p.x,p.y-1,p.z))) return;
+    set(world,p,makeBlockState(0),changed);
+    if (entities_ != nullptr) entities_->spawnFallingBlock(state, glm::dvec3(p) + glm::dvec3(0.5,0.0,0.5));
+    else { glm::ivec3 dest=p; while(dest.y>0&&canReplace(world.getBlock(dest.x,dest.y-1,dest.z)))--dest.y; set(world,dest,state,changed); }
 }
 
 bool DynamicBlockSystem::hasWaterNearby(const World& world,const glm::ivec3& p,int radius) const {
@@ -205,7 +206,7 @@ void DynamicBlockSystem::explode(World& world,const glm::ivec3& c,std::vector<gl
 
 void DynamicBlockSystem::scheduledTick(World& world,const ScheduledTick& t,std::vector<glm::ivec3>& changed){
     const BlockState state=world.getBlock(t.position.x,t.position.y,t.position.z);if(blockId(state)!=blockId(t.expectedState))return;const BlockId id=static_cast<BlockId>(blockId(state));
-    if(isWater(id))tickFluid(world,t.position,state,false,changed);else if(isLava(id))tickFluid(world,t.position,state,true,changed);else if(id==BlockId::Sand||id==BlockId::Gravel||id==BlockId::ConcretePowder)tickFalling(world,t.position,state,changed);else if(id==BlockId::Fire)tickFire(world,t.position,state,changed);else if(id==BlockId::TNT){set(world,t.position,makeBlockState(0),changed);explode(world,t.position,changed);}
+    if(isWater(id))tickFluid(world,t.position,state,false,changed);else if(isLava(id))tickFluid(world,t.position,state,true,changed);else if(id==BlockId::Sand||id==BlockId::Gravel||id==BlockId::ConcretePowder)tickFalling(world,t.position,state,changed);else if(id==BlockId::Fire)tickFire(world,t.position,state,changed);else if(id==BlockId::TNT){set(world,t.position,makeBlockState(0),changed);if(entities_!=nullptr)entities_->spawnTnt(glm::dvec3(t.position)+glm::dvec3(0.5,0.0,0.5),80);else explode(world,t.position,changed);}
 }
 
 void DynamicBlockSystem::randomTick(World& world,const glm::ivec3& p,BlockState state,std::vector<glm::ivec3>& changed){

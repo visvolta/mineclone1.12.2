@@ -202,6 +202,8 @@ GameHud::GameHud(GLFWwindow* window, const std::filesystem::path& assetRoot, Tex
         assetRoot / "assets/minecraft/textures/gui/container/furnace.png", 256, 256);
     hopperTexture_ = loadExactTexture(
         assetRoot / "assets/minecraft/textures/gui/container/hopper.png", 256, 256);
+    dispenserTexture_ = loadExactTexture(
+        assetRoot / "assets/minecraft/textures/gui/container/dispenser.png", 256, 256);
     brewingTexture_ = loadExactTexture(
         assetRoot / "assets/minecraft/textures/gui/container/brewing_stand.png", 256, 256);
     enchantingTexture_ = loadExactTexture(
@@ -233,6 +235,7 @@ GameHud::~GameHud() {
     if (beaconTexture_ != 0) glDeleteTextures(1, &beaconTexture_);
     if (enchantingTexture_ != 0) glDeleteTextures(1, &enchantingTexture_);
     if (brewingTexture_ != 0) glDeleteTextures(1, &brewingTexture_);
+    if (dispenserTexture_ != 0) glDeleteTextures(1, &dispenserTexture_);
     if (hopperTexture_ != 0) glDeleteTextures(1, &hopperTexture_);
     if (furnaceTexture_ != 0) glDeleteTextures(1, &furnaceTexture_);
     if (craftingTableTexture_ != 0) glDeleteTextures(1, &craftingTableTexture_);
@@ -1023,6 +1026,12 @@ std::vector<ItemStack> GameHud::takeCraftingDrops() {
     return result;
 }
 
+std::vector<ExperienceDrop> GameHud::takeExperienceDrops() {
+    auto result=std::move(experienceDrops_);
+    experienceDrops_.clear();
+    return result;
+}
+
 void GameHud::renderContainerScreen(const World& world, Player& player,
                                     int scaledWidth, int scaledHeight, int scaleFactor) {
     if (!activeBlockEntityAction_) return;
@@ -1095,7 +1104,7 @@ void GameHud::renderFurnaceScreen(const World& world, Player& player, int scaled
     if(cook>0.0F){const int w=std::clamp(static_cast<int>(cook*24.0F),0,24);if(w>0)draw->AddImage(textureId(furnaceTexture_),ImVec2((left+79)*sx,(top+34)*sy),ImVec2((left+79+w)*sx,(top+51)*sy),ImVec2(176.0F/256.0F,14.0F/256.0F),ImVec2((176.0F+w)/256.0F,31.0F/256.0F));}
     const float mx=io.MousePos.x/sx,my=io.MousePos.y/sy;const bool lc=ImGui::IsMouseClicked(ImGuiMouseButton_Left),rc=ImGui::IsMouseClicked(ImGuiMouseButton_Right);ItemStack hovered{};
     constexpr std::array<std::array<float,2>,3> fp={{{56,17},{56,53},{116,35}}};
-    for(int i=0;i<3;++i){const float x=left+fp[i][0],y=top+fp[i][1];ItemStack& slot=blockEntities_.containerSlot(world,pos,i);drawStack(slot,x+1,y+1,scaleFactor);if(mx>=x&&mx<x+18&&my>=y&&my<y+18){hovered=slot;if((lc||rc)&&i!=2)interactInventorySlot(slot,rc,false);else if(lc&&i==2&&!slot.empty()){const int before=slot.count;if(cursorStack_.empty()){cursorStack_=slot;slot.clear();}else if(cursorStack_.sameItem(slot)){const int limit=items_.get(slot.itemId).maxStackSize;const int moved=std::min(limit-cursorStack_.count,slot.count);cursorStack_.count+=moved;slot.shrink(moved);}if(slot.count<before){const float xp=blockEntities_.takeFurnaceExperience(pos);player.addExperience(static_cast<int>(std::floor(xp+0.5F)));}}}}
+    for(int i=0;i<3;++i){const float x=left+fp[i][0],y=top+fp[i][1];ItemStack& slot=blockEntities_.containerSlot(world,pos,i);drawStack(slot,x+1,y+1,scaleFactor);if(mx>=x&&mx<x+18&&my>=y&&my<y+18){hovered=slot;if((lc||rc)&&i!=2)interactInventorySlot(slot,rc,false);else if(lc&&i==2&&!slot.empty()){const int before=slot.count;if(cursorStack_.empty()){cursorStack_=slot;slot.clear();}else if(cursorStack_.sameItem(slot)){const int limit=items_.get(slot.itemId).maxStackSize;const int moved=std::min(limit-cursorStack_.count,slot.count);cursorStack_.count+=moved;slot.shrink(moved);}if(slot.count<before){const float xp=blockEntities_.takeFurnaceExperience(pos);experienceDrops_.push_back({glm::dvec3(pos)+glm::dvec3(0.5,0.5,0.5),static_cast<int>(std::floor(xp+0.5F))});}}}}
     for(int row=0;row<3;++row)for(int col=0;col<9;++col){const std::size_t idx=static_cast<std::size_t>(9+row*9+col);const float x=left+8+col*18.0F,y=top+84+row*18.0F;ItemStack& slot=player.inventory().slot(idx);drawStack(slot,x+1,y+1,scaleFactor);if(mx>=x&&mx<x+18&&my>=y&&my<y+18){hovered=slot;if(lc||rc)interactInventorySlot(slot,rc,false);}}
     for(int col=0;col<9;++col){const float x=left+8+col*18.0F,y=top+142;ItemStack& slot=player.inventory().slot(static_cast<std::size_t>(col));drawStack(slot,x+1,y+1,scaleFactor);if(mx>=x&&mx<x+18&&my>=y&&my<y+18){hovered=slot;if(lc||rc)interactInventorySlot(slot,rc,false);}}
     if(!hovered.empty())drawTooltip(hovered,mx,my,scaledWidth,scaledHeight,scaleFactor);if(!cursorStack_.empty())drawStack(cursorStack_,mx-8,my-8,scaleFactor);
@@ -1114,6 +1123,48 @@ void GameHud::renderHopperScreen(const World& world, Player& player, int scaledW
     for(int row=0;row<3;++row)for(int col=0;col<9;++col){std::size_t idx=static_cast<std::size_t>(9+row*9+col);float x=left+8+col*18.0F,y=top+51+row*18.0F;ItemStack& slot=player.inventory().slot(idx);drawStack(slot,x+1,y+1,scaleFactor);if(mx>=x&&mx<x+18&&my>=y&&my<y+18){hovered=slot;if(lc||rc)interactInventorySlot(slot,rc,false);}}
     for(int col=0;col<9;++col){float x=left+8+col*18.0F,y=top+109;ItemStack& slot=player.inventory().slot(static_cast<std::size_t>(col));drawStack(slot,x+1,y+1,scaleFactor);if(mx>=x&&mx<x+18&&my>=y&&my<y+18){hovered=slot;if(lc||rc)interactInventorySlot(slot,rc,false);}}
     if(!hovered.empty())drawTooltip(hovered,mx,my,scaledWidth,scaledHeight,scaleFactor);if(!cursorStack_.empty())drawStack(cursorStack_,mx-8,my-8,scaleFactor);
+}
+
+void GameHud::renderDispenserScreen(const World& world, Player& player,
+                                    int scaledWidth, int scaledHeight, int scaleFactor) {
+    if (!activeBlockEntityAction_) return;
+    const glm::ivec3 pos = activeBlockEntityAction_->position;
+    const float left = static_cast<float>((scaledWidth - 176) / 2);
+    const float top = static_cast<float>((scaledHeight - 166) / 2);
+    ImDrawList* draw = ImGui::GetBackgroundDrawList();
+    ImGuiIO& io = ImGui::GetIO();
+    const float sx = static_cast<float>(scaleFactor) / std::max(io.DisplayFramebufferScale.x, 1.0e-6F);
+    const float sy = static_cast<float>(scaleFactor) / std::max(io.DisplayFramebufferScale.y, 1.0e-6F);
+    draw->AddImage(textureId(dispenserTexture_), ImVec2(left*sx, top*sy),
+                   ImVec2((left+176)*sx, (top+166)*sy), ImVec2(0,0),
+                   ImVec2(176.0F/256.0F, 166.0F/256.0F));
+    drawText(left+8, top+6, blockEntities_.containerTitle(world,pos), scaleFactor, false, 0xFF404040U);
+    drawText(left+8, top+72, "Inventory", scaleFactor, false, 0xFF404040U);
+
+    const float mx = io.MousePos.x/sx, my = io.MousePos.y/sy;
+    const bool lc = ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+    const bool rc = ImGui::IsMouseClicked(ImGuiMouseButton_Right);
+    ItemStack hovered{};
+    for (int row=0; row<3; ++row) for (int col=0; col<3; ++col) {
+        const int index = row*3+col;
+        const float x=left+62+col*18.0F, y=top+17+row*18.0F;
+        ItemStack& slot=blockEntities_.containerSlot(world,pos,index);
+        drawStack(slot,x+1,y+1,scaleFactor);
+        if(mx>=x&&mx<x+18&&my>=y&&my<y+18){hovered=slot;if(lc||rc)interactInventorySlot(slot,rc,false);}
+    }
+    for(int row=0;row<3;++row)for(int col=0;col<9;++col){
+        const std::size_t idx=static_cast<std::size_t>(9+row*9+col);
+        const float x=left+8+col*18.0F,y=top+84+row*18.0F;
+        ItemStack& slot=player.inventory().slot(idx);drawStack(slot,x+1,y+1,scaleFactor);
+        if(mx>=x&&mx<x+18&&my>=y&&my<y+18){hovered=slot;if(lc||rc)interactInventorySlot(slot,rc,false);}
+    }
+    for(int col=0;col<9;++col){
+        const float x=left+8+col*18.0F,y=top+142;
+        ItemStack& slot=player.inventory().slot(static_cast<std::size_t>(col));drawStack(slot,x+1,y+1,scaleFactor);
+        if(mx>=x&&mx<x+18&&my>=y&&my<y+18){hovered=slot;if(lc||rc)interactInventorySlot(slot,rc,false);}
+    }
+    if(!hovered.empty())drawTooltip(hovered,mx,my,scaledWidth,scaledHeight,scaleFactor);
+    if(!cursorStack_.empty())drawStack(cursorStack_,mx-8,my-8,scaleFactor);
 }
 
 void GameHud::renderBrewingScreen(const World& world, Player& player, int scaledWidth, int scaledHeight, int scaleFactor) {
@@ -1209,10 +1260,11 @@ void GameHud::renderBlockEntityScreen(const World& world, Player& player,
         renderEnchantingScreen(world,player,scaledWidth,scaledHeight,scaleFactor);
     else if(activeBlockEntityAction_->type==BlockEntityActionType::OpenBeacon)
         renderBeaconScreen(world,player,scaledWidth,scaledHeight,scaleFactor);
-    else if(activeBlockEntityAction_->type==BlockEntityActionType::OpenEnderChest ||
-            activeBlockEntityAction_->type==BlockEntityActionType::OpenDispenser ||
-            activeBlockEntityAction_->type==BlockEntityActionType::OpenDropper)
+    else if(activeBlockEntityAction_->type==BlockEntityActionType::OpenEnderChest)
         renderContainerScreen(world,player,scaledWidth,scaledHeight,scaleFactor);
+    else if(activeBlockEntityAction_->type==BlockEntityActionType::OpenDispenser ||
+            activeBlockEntityAction_->type==BlockEntityActionType::OpenDropper)
+        renderDispenserScreen(world,player,scaledWidth,scaledHeight,scaleFactor);
     else if(activeBlockEntityAction_->type==BlockEntityActionType::OpenCraftingTable)
         renderCraftingTableScreen(player,scaledWidth,scaledHeight,scaleFactor);
 }

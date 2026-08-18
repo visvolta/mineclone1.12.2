@@ -10,6 +10,7 @@
 #include <unordered_set>
 
 #include "environment/Environment.hpp"
+#include "entity/EntityManager.hpp"
 #include "items/ItemRegistry.hpp"
 #include "save/RegionFile.hpp"
 #include "save/SaveMigration.hpp"
@@ -408,7 +409,8 @@ void WorldSave::saveLevel(const WorldConfig& config, const Player& player,
 }
 
 nbt::Document WorldSave::chunkDocument(const Chunk& chunk,
-                                       const BlockEntitySystem& blockEntities) const {
+                                       const BlockEntitySystem& blockEntities,
+                                       const EntityManager* entities) const {
     nbt::Compound level;
     level["xPos"] = nbt::Tag(static_cast<std::int32_t>(chunk.x()));
     level["zPos"] = nbt::Tag(static_cast<std::int32_t>(chunk.z()));
@@ -472,7 +474,16 @@ nbt::Document WorldSave::chunkDocument(const Chunk& chunk,
         sections.emplace_back(std::move(section));
     }
     level["Sections"] = nbt::Tag(nbt::Type::Compound, std::move(sections));
-    level["Entities"] = nbt::Tag(nbt::Type::Compound, nbt::List{});
+    nbt::List entityList;
+    for (const auto& encoded : chunk.entityNbt()) {
+        try { auto doc = nbt::decode(encoded); if (doc.root.type == nbt::Type::Compound) entityList.push_back(std::move(doc.root)); } catch (...) {}
+    }
+    if (entities != nullptr) {
+        for (const auto& encoded : entities->serializeChunk(chunk.x(), chunk.z())) {
+            try { auto doc = nbt::decode(encoded); if (doc.root.type == nbt::Type::Compound) entityList.push_back(std::move(doc.root)); } catch (...) {}
+        }
+    }
+    level["Entities"] = nbt::Tag(nbt::Type::Compound, std::move(entityList));
 
     const int minimumX = chunk.x() * 16;
     const int minimumZ = chunk.z() * 16;
@@ -649,6 +660,15 @@ std::unique_ptr<Chunk> WorldSave::chunkFromDocument(const nbt::Document& documen
     }
     chunk->applyLighting(sky, block);
 
+    if (const nbt::Tag* entityList = nbt::find(level, "Entities");
+        entityList != nullptr && entityList->type == nbt::Type::List) {
+        for (const nbt::Tag& entity : entityList->list()) {
+            if (entity.type != nbt::Type::Compound) continue;
+            nbt::Document single; single.root = entity;
+            chunk->addEntityNbt(nbt::encode(single));
+        }
+    }
+
     if (const nbt::Tag* tileEntities = nbt::find(level, "TileEntities");
         tileEntities != nullptr && tileEntities->type == nbt::Type::List) {
         for (const nbt::Tag& tile : tileEntities->list()) {
@@ -712,18 +732,18 @@ std::unique_ptr<Chunk> WorldSave::loadChunk(int chunkX, int chunkZ) const {
     return chunkFromDocument(nbt::decode(*bytes));
 }
 
-void WorldSave::saveChunk(const Chunk& chunk, const BlockEntitySystem& blockEntities) {
+void WorldSave::saveChunk(const Chunk& chunk, const BlockEntitySystem& blockEntities, const EntityManager* entities) {
     RegionFile region(regionPath(chunk.x(), chunk.z()));
     region.writeChunk(floorMod32(chunk.x()), floorMod32(chunk.z()),
-                      nbt::encode(chunkDocument(chunk, blockEntities)));
+                      nbt::encode(chunkDocument(chunk, blockEntities, entities)));
 }
 
 void WorldSave::saveAll(const World& world, const BlockEntitySystem& blockEntities,
                         const WorldConfig& config, const Player& player,
-                        const Environment& environment) {
+                        const Environment& environment, const EntityManager* entities) {
     for (const auto& [key, chunk] : world.chunks()) {
         static_cast<void>(key);
-        if (chunk) saveChunk(*chunk, blockEntities);
+        if (chunk) saveChunk(*chunk, blockEntities, entities);
     }
     saveLevel(config, player, environment, &blockEntities);
 }
