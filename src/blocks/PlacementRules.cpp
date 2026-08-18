@@ -738,6 +738,11 @@ std::optional<PlacementPlan> PlacementRules::activation(
     if (isComparator(id)) {
         return PlacementPlan{{{hit.block, block(id, static_cast<std::uint8_t>(meta ^ 4U))}}, false};
     }
+    if (id == BlockId::DaylightDetector || id == BlockId::DaylightDetectorInverted) {
+        const BlockId toggled = id == BlockId::DaylightDetector
+            ? BlockId::DaylightDetectorInverted : BlockId::DaylightDetector;
+        return PlacementPlan{{{hit.block, block(toggled, meta)}}, false};
+    }
     return std::nullopt;
 }
 

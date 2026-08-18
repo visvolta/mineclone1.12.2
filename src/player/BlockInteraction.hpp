@@ -13,6 +13,7 @@
 class ItemRegistry;
 class ItemEntitySystem;
 class DynamicBlockSystem;
+class RedstoneSystem;
 class Player;
 class LightingEngine;
 class World;
@@ -23,8 +24,8 @@ struct BlockSoundEvent { BlockSoundEventType type; glm::ivec3 position; BlockSta
 
 class BlockInteraction {
 public:
-    BlockInteraction(const ItemRegistry& items, BlockEntitySystem& blockEntities, ItemEntitySystem& itemEntities, DynamicBlockSystem& dynamicBlocks)
-        : items_(items), placement_(items), blockEntities_(blockEntities), itemEntities_(itemEntities), dynamicBlocks_(dynamicBlocks) {}
+    BlockInteraction(const ItemRegistry& items, BlockEntitySystem& blockEntities, ItemEntitySystem& itemEntities, DynamicBlockSystem& dynamicBlocks, RedstoneSystem& redstone)
+        : items_(items), placement_(items), blockEntities_(blockEntities), itemEntities_(itemEntities), dynamicBlocks_(dynamicBlocks), redstone_(redstone) {}
 
     void tick(World& world, LightingEngine& lighting, WorldRenderer& renderer,
               Player& player, const glm::vec3& lookDirection,
@@ -52,6 +53,7 @@ private:
     BlockEntitySystem& blockEntities_;
     ItemEntitySystem& itemEntities_;
     DynamicBlockSystem& dynamicBlocks_;
+    RedstoneSystem& redstone_;
     std::optional<BlockEntityAction> pendingBlockEntityAction_;
     std::optional<glm::ivec3> breakingBlock_;
     ItemStack breakingItem_{};

@@ -72,6 +72,8 @@ std::optional<RuntimeBlockEntityType> BlockEntitySystem::typeFor(BlockState stat
     if (id == BlockId::MobSpawner) return RuntimeBlockEntityType::MobSpawner;
     if (id == BlockId::EnderChest) return RuntimeBlockEntityType::EnderChest;
     if (id == BlockId::StandingBanner || id == BlockId::WallBanner) return RuntimeBlockEntityType::Banner;
+    if (id == BlockId::Dispenser) return RuntimeBlockEntityType::Dispenser;
+    if (id == BlockId::Dropper) return RuntimeBlockEntityType::Dropper;
     return std::nullopt;
 }
 
@@ -286,6 +288,8 @@ std::optional<BlockEntityAction> BlockEntitySystem::activate(const World& world,
     if (id == BlockId::EnderChest) return BlockEntityAction{BlockEntityActionType::OpenEnderChest, hit.block};
     if (id == BlockId::Jukebox) return BlockEntityAction{BlockEntityActionType::OpenJukebox, hit.block};
     if (id == BlockId::FlowerPot) return BlockEntityAction{BlockEntityActionType::OpenFlowerPot, hit.block};
+    if (id == BlockId::Dispenser) return BlockEntityAction{BlockEntityActionType::OpenDispenser, hit.block};
+    if (id == BlockId::Dropper) return BlockEntityAction{BlockEntityActionType::OpenDropper, hit.block};
     return std::nullopt;
 }
 
@@ -393,6 +397,7 @@ int BlockEntitySystem::containerSlotCount(const World& world, const glm::ivec3& 
     if (entity->type == RuntimeBlockEntityType::Jukebox) return 1;
     if (entity->type == RuntimeBlockEntityType::FlowerPot) return 1;
     if (entity->type == RuntimeBlockEntityType::EnderChest) return 27;
+    if (entity->type == RuntimeBlockEntityType::Dispenser || entity->type == RuntimeBlockEntityType::Dropper) return 9;
     if (entity->type == RuntimeBlockEntityType::ShulkerBox) return 27;
     if (entity->type == RuntimeBlockEntityType::Chest || entity->type == RuntimeBlockEntityType::TrappedChest)
         return pairedChest(world, position) ? 54 : 27;
@@ -410,6 +415,10 @@ ItemStack& BlockEntitySystem::containerSlot(const World& world, const glm::ivec3
     if (clicked->type == RuntimeBlockEntityType::EnderChest) {
         if (index >= 27) throw std::out_of_range("Container slot outside ender chest");
         return enderChestInventory_[static_cast<std::size_t>(index)];
+    }
+    if (clicked->type == RuntimeBlockEntityType::Dispenser || clicked->type == RuntimeBlockEntityType::Dropper) {
+        if (index >= 9) throw std::out_of_range("Container slot outside dispenser/dropper");
+        return clicked->inventory[static_cast<std::size_t>(index)];
     }
     if (clicked->type == RuntimeBlockEntityType::Hopper || clicked->type == RuntimeBlockEntityType::BrewingStand ||
         clicked->type == RuntimeBlockEntityType::EnchantingTable || clicked->type == RuntimeBlockEntityType::Beacon ||
@@ -456,6 +465,8 @@ std::string BlockEntitySystem::containerTitle(const World& world, const glm::ive
     if (entity->type == RuntimeBlockEntityType::Jukebox) return "Jukebox";
     if (entity->type == RuntimeBlockEntityType::FlowerPot) return "Flower Pot";
     if (entity->type == RuntimeBlockEntityType::EnderChest) return "Ender Chest";
+    if (entity->type == RuntimeBlockEntityType::Dispenser) return "Dispenser";
+    if (entity->type == RuntimeBlockEntityType::Dropper) return "Dropper";
     if (entity->type == RuntimeBlockEntityType::ShulkerBox) return "Shulker Box";
     if (entity->type == RuntimeBlockEntityType::TrappedChest)
         return pairedChest(world, position) ? "Large Trapped Chest" : "Trapped Chest";

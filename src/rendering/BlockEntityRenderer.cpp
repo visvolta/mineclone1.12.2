@@ -192,6 +192,7 @@ void BlockEntityRenderer::render(const World& world,const glm::mat4& view,const 
             case RuntimeBlockEntityType::Beacon: renderBeaconBeam(world,e,identity,partialTick); break;
             case RuntimeBlockEntityType::Furnace: case RuntimeBlockEntityType::Hopper: case RuntimeBlockEntityType::BrewingStand:
             case RuntimeBlockEntityType::Jukebox: case RuntimeBlockEntityType::FlowerPot: case RuntimeBlockEntityType::MobSpawner:
+            case RuntimeBlockEntityType::Dispenser: case RuntimeBlockEntityType::Dropper:
                 break; // normal JSON block model or deferred entity model
         }
     }

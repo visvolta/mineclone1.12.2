@@ -606,7 +606,9 @@ BlockModelState resolveBlockModelState(BlockState state, const RelativeBlockLook
         case BlockId::PoweredComparator:
             result.properties["facing"] = horizontalFacing(meta);
             result.properties["mode"] = (meta & 4U) != 0U ? "subtract" : "compare";
-            result.properties["powered"] = boolString((meta & 8U) != 0U);
+            // In 1.12.2 comparator power is represented by the powered/unpowered
+            // block ID, not by an extra legacy metadata bit.
+            result.properties["powered"] = boolString(id == BlockId::PoweredComparator);
             break;
         case BlockId::RedstoneWire:
             result.properties["north"] = redstoneAttach(lookup, "north");

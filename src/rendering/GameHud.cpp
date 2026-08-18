@@ -1209,7 +1209,9 @@ void GameHud::renderBlockEntityScreen(const World& world, Player& player,
         renderEnchantingScreen(world,player,scaledWidth,scaledHeight,scaleFactor);
     else if(activeBlockEntityAction_->type==BlockEntityActionType::OpenBeacon)
         renderBeaconScreen(world,player,scaledWidth,scaledHeight,scaleFactor);
-    else if(activeBlockEntityAction_->type==BlockEntityActionType::OpenEnderChest)
+    else if(activeBlockEntityAction_->type==BlockEntityActionType::OpenEnderChest ||
+            activeBlockEntityAction_->type==BlockEntityActionType::OpenDispenser ||
+            activeBlockEntityAction_->type==BlockEntityActionType::OpenDropper)
         renderContainerScreen(world,player,scaledWidth,scaledHeight,scaleFactor);
     else if(activeBlockEntityAction_->type==BlockEntityActionType::OpenCraftingTable)
         renderCraftingTableScreen(player,scaledWidth,scaledHeight,scaleFactor);

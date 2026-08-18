@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(Blockcraft VERSION 0.17.1 LANGUAGES C CXX)
+project(Blockcraft VERSION 0.18.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -143,11 +143,36 @@ if(BUILD_TESTING)
     target_include_directories(blockcraft_functional_block_entity_tests PRIVATE src)
     target_link_libraries(blockcraft_functional_block_entity_tests PRIVATE glm::glm zlibstatic)
 
+
+    add_executable(blockcraft_redstone_tests
+        tests/RedstoneTests.cpp
+        src/blocks/BlockRegistry.cpp
+        src/blocks/BlockShape.cpp
+        src/core/Json.cpp
+        src/items/ItemRegistry.cpp
+        src/player/Player.cpp
+        src/player/PlayerInventory.cpp
+        src/survival/MiningRules.cpp
+        src/survival/FurnaceRules.cpp
+        src/survival/FoodStats.cpp
+        src/world/Chunk.cpp
+        src/world/World.cpp
+        src/world/Raycast.cpp
+        src/world/BlockEntitySystem.cpp
+        src/world/BlockEntityLogic.cpp
+        src/world/ItemEntitySystem.cpp
+        src/world/RedstoneSystem.cpp
+        src/save/Nbt.cpp
+    )
+    target_include_directories(blockcraft_redstone_tests PRIVATE src)
+    target_link_libraries(blockcraft_redstone_tests PRIVATE glm::glm zlibstatic)
+
     foreach(blockcraft_test_target IN ITEMS
         blockcraft_foundation_tests
         blockcraft_persistence_tests
         blockcraft_dynamic_world_tests
-        blockcraft_functional_block_entity_tests)
+        blockcraft_functional_block_entity_tests
+        blockcraft_redstone_tests)
         if(MSVC)
             target_compile_options(${blockcraft_test_target} PRIVATE /W4 /permissive- /UNDEBUG)
         else()
@@ -159,10 +184,11 @@ if(BUILD_TESTING)
     add_test(NAME blockcraft_persistence COMMAND blockcraft_persistence_tests)
     add_test(NAME blockcraft_dynamic_world COMMAND blockcraft_dynamic_world_tests)
     add_test(NAME blockcraft_functional_block_entities COMMAND blockcraft_functional_block_entity_tests)
+    add_test(NAME blockcraft_redstone COMMAND blockcraft_redstone_tests)
 endif()
 
 if(NOT BLOCKCRAFT_REQUIRE_MINECRAFT_ASSETS)
-    message(STATUS "Minecraft assets disabled: building four asset-free regression suites.")
+    message(STATUS "Minecraft assets disabled: building five asset-free regression suites.")
     return()
 endif()
 
@@ -325,6 +351,7 @@ set(BLOCKCRAFT_CORE_SOURCES
     src/world/BlockEntitySystem.cpp
     src/world/BlockEntityLogic.cpp
     src/world/DynamicBlockSystem.cpp
+    src/world/RedstoneSystem.cpp
     src/world/ItemEntitySystem.cpp
     src/save/Nbt.cpp
     src/save/SaveMigration.cpp

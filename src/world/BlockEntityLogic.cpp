@@ -190,7 +190,8 @@ void tickFurnace(World& world, RuntimeBlockEntity& entity, std::vector<glm::ivec
     changedBlocks.push_back(entity.position);
 }
 
-void tickHopper(World&, BlockEntitySystem& system, RuntimeBlockEntity& entity) {
+void tickHopper(World& world, BlockEntitySystem& system, RuntimeBlockEntity& entity) {
+    if ((blockMetadata(world.getBlock(entity.position.x, entity.position.y, entity.position.z)) & 8U) != 0U) return;
     if (entity.transferCooldown > 0) {
         --entity.transferCooldown;
         return;

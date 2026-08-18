@@ -27,7 +27,9 @@ enum class RuntimeBlockEntityType : std::uint8_t {
     FlowerPot,
     MobSpawner,
     EnderChest,
-    Banner
+    Banner,
+    Dispenser,
+    Dropper
 };
 
 enum class BlockEntityActionType : std::uint8_t {
@@ -43,7 +45,9 @@ enum class BlockEntityActionType : std::uint8_t {
     OpenBeacon,
     OpenEnderChest,
     OpenJukebox,
-    OpenFlowerPot
+    OpenFlowerPot,
+    OpenDispenser,
+    OpenDropper
 };
 
 struct BlockEntityAction {

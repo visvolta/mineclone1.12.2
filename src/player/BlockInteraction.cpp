@@ -14,6 +14,7 @@
 #include "survival/MiningRules.hpp"
 #include "world/ItemEntitySystem.hpp"
 #include "world/DynamicBlockSystem.hpp"
+#include "world/RedstoneSystem.hpp"
 #include "world/World.hpp"
 
 namespace {
@@ -29,7 +30,8 @@ void BlockInteraction::commitEdit(World& world,LightingEngine& lighting,WorldRen
     const BlockState old=world.getBlock(p.x,p.y,p.z); world.setBlock(p.x,p.y,p.z,state); blockEntities_.blockChanged(world,p,old,state);
     dynamicBlocks_.neighborChanged(world,p);
     constexpr std::array<glm::ivec3,6> around{{{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}}};
-    for (const glm::ivec3& d : around) dynamicBlocks_.neighborChanged(world,p+d);
+    redstone_.neighborChanged(world,p);
+    for (const glm::ivec3& d : around) { dynamicBlocks_.neighborChanged(world,p+d); redstone_.neighborChanged(world,p+d); }
     const auto changes=lighting.blockChangedSync(p.x,p.y,p.z); renderer.blockChangedSync(p.x,p.y,p.z,changes);
 }
 void BlockInteraction::applyPlan(World& world,LightingEngine& lighting,WorldRenderer& renderer,const PlacementPlan& plan,bool notify){

@@ -41,6 +41,7 @@
 #include "world/BlockEntitySystem.hpp"
 #include "world/DynamicBlockSystem.hpp"
 #include "world/ItemEntitySystem.hpp"
+#include "world/RedstoneSystem.hpp"
 #include "worldgen/ChunkStreamer.hpp"
 #include "worldgen/WorldConfig.hpp"
 
@@ -222,6 +223,7 @@ int main() {
         World world;
         BlockEntitySystem blockEntities;
         DynamicBlockSystem dynamicBlocks(static_cast<std::uint64_t>(config.seed));
+        RedstoneSystem redstone;
         ItemEntitySystem itemEntities(itemRegistry);
         Player player({0.5, 80.0, 0.5});
         LoadedPlayerState loadedPlayer = worldSave.loadPlayer(player, &blockEntities);
@@ -256,7 +258,7 @@ int main() {
         blockEntities.scanLoadedWorld(world);
         for (const auto& [unused, chunk] : world.chunks()) {
             (void)unused;
-            if (chunk) dynamicBlocks.scanChunk(world, chunk->x(), chunk->z());
+            if (chunk) { dynamicBlocks.scanChunk(world, chunk->x(), chunk->z()); redstone.scanChunk(world, chunk->x(), chunk->z()); }
         }
         frontEnd->showLoading("Loading world", "Preparing world renderer", 82);
         WorldRenderer worldRenderer(world, atlas, blockRenderResources, chunkStreamer.workers());
@@ -270,7 +272,7 @@ int main() {
         GameHud gameHud(window, BLOCKCRAFT_ASSET_ROOT, atlas, itemRegistry, blockRenderResources, blockEntities);
         BlockEntityRenderer blockEntityRenderer(BLOCKCRAFT_ASSET_ROOT, blockEntities);
         ItemEntityRenderer itemEntityRenderer(BLOCKCRAFT_ASSET_ROOT, itemRegistry, blockRenderResources, atlas);
-        BlockInteraction interaction(itemRegistry, blockEntities, itemEntities, dynamicBlocks);
+        BlockInteraction interaction(itemRegistry, blockEntities, itemEntities, dynamicBlocks, redstone);
         camera.setPosition(player.eyePosition());
         setCursorCaptured(window, true);
         updateWindowTitle(window, player, itemRegistry, config, 0.0, world.chunkCount(),
@@ -398,6 +400,8 @@ int main() {
                                 action->type == BlockEntityActionType::OpenEnderChest ||
                                 action->type == BlockEntityActionType::OpenJukebox ||
                                 action->type == BlockEntityActionType::OpenFlowerPot ||
+                                action->type == BlockEntityActionType::OpenDispenser ||
+                                action->type == BlockEntityActionType::OpenDropper ||
                                 action->type == BlockEntityActionType::EditSign) {
                                 gameHud.openBlockEntityScreen(*action);
                                 inventoryOpen = true;
@@ -415,22 +419,21 @@ int main() {
                             }
                         }
                     }
-                    // Stage 12.5 establishes one deterministic game-tick order:
-                    // scheduled blocks -> random blocks -> block entities -> entities -> environment.
-                    const auto applyDynamicChanges = [&](const std::vector<glm::ivec3>& changes) {
+                    // Stage 13 keeps simulation ordering explicit: scheduled world updates,
+                    // redstone power propagation/devices, random ticks, block entities, entities, environment.
+                    const auto applyWorldChanges = [&](const std::vector<glm::ivec3>& changes, bool notifyRedstone) {
                         for (const glm::ivec3& changed : changes) {
                             blockEntities.rescanPosition(world, changed);
+                            dynamicBlocks.neighborChanged(world, changed);
+                            if (notifyRedstone) redstone.neighborChanged(world, changed);
                             const auto lightingChanges = lightingEngine.blockChangedSync(changed.x, changed.y, changed.z);
                             worldRenderer.blockChangedSync(changed.x, changed.y, changed.z, lightingChanges);
                         }
                     };
-                    applyDynamicChanges(dynamicBlocks.tickScheduled(world));
-                    applyDynamicChanges(dynamicBlocks.tickRandom(world));
-                    for (const glm::ivec3& changed : blockEntities.tick(world)) {
-                        const auto lightingChanges = lightingEngine.blockChangedSync(changed.x, changed.y, changed.z);
-                        worldRenderer.blockChangedSync(changed.x, changed.y, changed.z, lightingChanges);
-                        dynamicBlocks.neighborChanged(world, changed);
-                    }
+                    applyWorldChanges(dynamicBlocks.tickScheduled(world), true);
+                    applyWorldChanges(redstone.tick(world, blockEntities, &itemEntities, player, environment.dayTime()), false);
+                    applyWorldChanges(dynamicBlocks.tickRandom(world), true);
+                    applyWorldChanges(blockEntities.tick(world), true);
                     itemEntities.tick(world, player);
                     environment.tick(world);
                     // Stage 9 sound events are intentionally hooks only; consume them so
@@ -464,6 +467,7 @@ int main() {
                 worldRenderer.chunkLoaded(coordinate.x, coordinate.z);
                 blockEntities.scanChunk(world, coordinate.x, coordinate.z);
                 dynamicBlocks.scanChunk(world, coordinate.x, coordinate.z);
+                redstone.scanChunk(world, coordinate.x, coordinate.z);
             }
             const std::vector<LightingChange> lightChanges = lightingEngine.process(
                 player.feetPosition().x, player.feetPosition().z, config.lightMainThreadBudgetMs);

@@ -122,6 +122,8 @@ std::string tileEntityId(RuntimeBlockEntityType type) {
         case RuntimeBlockEntityType::MobSpawner: return "minecraft:mob_spawner";
         case RuntimeBlockEntityType::EnderChest: return "minecraft:ender_chest";
         case RuntimeBlockEntityType::Banner: return "minecraft:banner";
+        case RuntimeBlockEntityType::Dispenser: return "minecraft:dispenser";
+        case RuntimeBlockEntityType::Dropper: return "minecraft:dropper";
     }
     return "minecraft:chest";
 }
