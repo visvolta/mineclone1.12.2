@@ -32,6 +32,9 @@ private:
                    const glm::mat4& transform);
     void renderShulker(const World& world, const RuntimeBlockEntity& entity,
                        const glm::mat4& transform, float partialTick);
+    void renderBanner(const World& world, const RuntimeBlockEntity& entity, const glm::mat4& transform, float partialTick);
+    void renderEnchantingBook(const World& world, const RuntimeBlockEntity& entity, const glm::mat4& transform, float partialTick);
+    void renderBeaconBeam(const World& world, const RuntimeBlockEntity& entity, const glm::mat4& transform, float partialTick);
 
     BlockEntitySystem& entities_;
     Shader shader_;
@@ -41,6 +44,10 @@ private:
     GLuint chestTrapped_ = 0;
     GLuint chestNormalDouble_ = 0;
     GLuint chestTrappedDouble_ = 0;
+    GLuint chestEnder_ = 0;
+    GLuint bannerTexture_ = 0;
+    GLuint enchantingBookTexture_ = 0;
+    GLuint beaconBeamTexture_ = 0;
     GLuint signTexture_ = 0;
     GLuint asciiTexture_ = 0;
     std::array<int, 256> charWidths_{};

@@ -123,6 +123,13 @@ BlockEntityRenderer::BlockEntityRenderer(const std::filesystem::path& root, Bloc
     chestTrapped_=loadTexture(entity/"chest/trapped.png",64,64);
     chestNormalDouble_=loadTexture(entity/"chest/normal_double.png",128,64);
     chestTrappedDouble_=loadTexture(entity/"chest/trapped_double.png",128,64);
+    chestEnder_=loadTexture(entity/"chest/ender.png",64,64);
+    bannerTexture_=loadTexture(entity/"banner_base.png",64,64);
+    enchantingBookTexture_=loadTexture(entity/"enchanting_table_book.png",64,32);
+    beaconBeamTexture_=loadTexture(entity/"beacon_beam.png",16,16);
+    glBindTexture(GL_TEXTURE_2D, beaconBeamTexture_);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
     signTexture_=loadTexture(entity/"sign.png",64,32);
     asciiTexture_=loadTexture(root/"assets/minecraft/textures/font/ascii.png",128,128);
     {
@@ -147,6 +154,8 @@ BlockEntityRenderer::BlockEntityRenderer(const std::filesystem::path& root, Bloc
 BlockEntityRenderer::~BlockEntityRenderer(){
     glDeleteTextures(1,&chestNormal_); glDeleteTextures(1,&chestTrapped_);
     glDeleteTextures(1,&chestNormalDouble_); glDeleteTextures(1,&chestTrappedDouble_);
+    glDeleteTextures(1,&chestEnder_); glDeleteTextures(1,&bannerTexture_);
+    glDeleteTextures(1,&enchantingBookTexture_); glDeleteTextures(1,&beaconBeamTexture_);
     glDeleteTextures(1,&signTexture_); glDeleteTextures(1,&asciiTexture_);
     glDeleteTextures(16,bedTextures_.data()); glDeleteTextures(16,shulkerTextures_.data());
     glDeleteBuffers(1,&vbo_); glDeleteVertexArrays(1,&vao_);
@@ -174,11 +183,16 @@ void BlockEntityRenderer::render(const World& world,const glm::mat4& view,const 
         (void)unused;
         const glm::mat4 identity(1.0F);
         switch(e.type){
-            case RuntimeBlockEntityType::Chest: case RuntimeBlockEntityType::TrappedChest: renderChest(world,e,identity,partialTick); break;
+            case RuntimeBlockEntityType::Chest: case RuntimeBlockEntityType::TrappedChest: case RuntimeBlockEntityType::EnderChest: renderChest(world,e,identity,partialTick); break;
             case RuntimeBlockEntityType::Sign: renderSign(world,e,identity); break;
             case RuntimeBlockEntityType::Bed: renderBed(world,e,identity); break;
             case RuntimeBlockEntityType::ShulkerBox: renderShulker(world,e,identity,partialTick); break;
-            case RuntimeBlockEntityType::Furnace: break; // furnace is a normal JSON block model
+            case RuntimeBlockEntityType::Banner: renderBanner(world,e,identity,partialTick); break;
+            case RuntimeBlockEntityType::EnchantingTable: renderEnchantingBook(world,e,identity,partialTick); break;
+            case RuntimeBlockEntityType::Beacon: renderBeaconBeam(world,e,identity,partialTick); break;
+            case RuntimeBlockEntityType::Furnace: case RuntimeBlockEntityType::Hopper: case RuntimeBlockEntityType::BrewingStand:
+            case RuntimeBlockEntityType::Jukebox: case RuntimeBlockEntityType::FlowerPot: case RuntimeBlockEntityType::MobSpawner:
+                break; // normal JSON block model or deferred entity model
         }
     }
     glEnable(GL_CULL_FACE);
@@ -231,7 +245,8 @@ void BlockEntityRenderer::renderChest(const World& world,const RuntimeBlockEntit
     knob=glm::rotate(knob,-eased*1.57079632679F,glm::vec3(1,0,0));
     modelBox(v,tw,64,0,0,-1,-2,-15,2,4,1,knob,light);
 
-    GLuint tex=id==BlockId::TrappedChest?(large?chestTrappedDouble_:chestTrapped_):(large?chestNormalDouble_:chestNormal_);
+    GLuint tex = id==BlockId::EnderChest ? chestEnder_ :
+        id==BlockId::TrappedChest ? (large?chestTrappedDouble_:chestTrapped_) : (large?chestNormalDouble_:chestNormal_);
     glBindTexture(GL_TEXTURE_2D,tex); glBindBuffer(GL_ARRAY_BUFFER,vbo_);
     glBufferData(GL_ARRAY_BUFFER,v.size()*sizeof(V),v.data(),GL_DYNAMIC_DRAW);
     glDrawArrays(GL_TRIANGLES,0,static_cast<GLsizei>(v.size()));
@@ -371,3 +386,67 @@ void BlockEntityRenderer::renderShulker(const World& world,const RuntimeBlockEnt
     glDrawArrays(GL_TRIANGLES,0,static_cast<GLsizei>(v.size()));
 }
 
+
+void BlockEntityRenderer::renderBanner(const World& world,const RuntimeBlockEntity& e,const glm::mat4&,float partialTick){
+    const BlockId id=static_cast<BlockId>(blockId(e.state));
+    glm::mat4 root=glm::translate(glm::mat4(1.0F),glm::vec3(e.position)+glm::vec3(0.5F,0.0F,0.5F));
+    if(id==BlockId::StandingBanner){
+        root=glm::rotate(root,glm::radians(-static_cast<float>(blockMetadata(e.state)&15U)*22.5F),glm::vec3(0,1,0));
+    } else {
+        const std::uint8_t meta=blockMetadata(e.state)&7U;
+        float yaw=meta==2?180.0F:meta==4?90.0F:meta==5?-90.0F:0.0F;
+        root=glm::rotate(root,glm::radians(-yaw),glm::vec3(0,1,0));
+        root=glm::translate(root,glm::vec3(0.0F,0.0F,-0.4375F));
+    }
+    const float wave=std::sin((static_cast<float>(e.position.x*7+e.position.y*9+e.position.z*13)+partialTick)*0.05F)*0.03F;
+    const float light=lightAt(world,e.position);
+    std::vector<V> v; v.reserve(108);
+    // ModelBanner dimensions from 1.12.2: slate 20x40x1, top bar 20x2x2,
+    // and a 2x42x2 pole for standing banners.
+    glm::mat4 cloth=glm::translate(root,glm::vec3(0.0F,1.25F,0.0F));
+    cloth=glm::rotate(cloth,wave,glm::vec3(1,0,0));
+    modelBox(v,64,64,0,0,-10,-20,-1,20,40,1,cloth,light);
+    modelBox(v,64,64,0,42,-10,-22,-1,20,2,2,root,light);
+    if(id==BlockId::StandingBanner) modelBox(v,64,64,44,0,-1,-30,-1,2,42,2,glm::translate(root,glm::vec3(0,2.0F,0)),light);
+    glBindTexture(GL_TEXTURE_2D,bannerTexture_); glBindBuffer(GL_ARRAY_BUFFER,vbo_);
+    glBufferData(GL_ARRAY_BUFFER,v.size()*sizeof(V),v.data(),GL_DYNAMIC_DRAW);
+    glDrawArrays(GL_TRIANGLES,0,static_cast<GLsizei>(v.size()));
+}
+
+void BlockEntityRenderer::renderEnchantingBook(const World& world,const RuntimeBlockEntity& e,const glm::mat4&,float partialTick){
+    const float light=lightAt(world,e.position);
+    const float bob=0.1F+std::sin((static_cast<float>(e.position.x+e.position.z)+partialTick)*0.1F)*0.03F;
+    glm::mat4 root=glm::translate(glm::mat4(1.0F),glm::vec3(e.position)+glm::vec3(0.5F,1.0F+bob,0.5F));
+    root=glm::rotate(root,glm::radians(25.0F),glm::vec3(0,1,0));
+    root=glm::rotate(root,glm::radians(-20.0F),glm::vec3(1,0,0));
+    std::vector<V> v; v.reserve(72);
+    modelBox(v,64,32,0,0,-8,-1,-5,8,1,10,root,light);
+    modelBox(v,64,32,0,0,0,-1,-5,8,1,10,root,light);
+    modelBox(v,64,32,24,10,-7,0,-4,7,1,8,root,light);
+    modelBox(v,64,32,24,10,0,0,-4,7,1,8,root,light);
+    glBindTexture(GL_TEXTURE_2D,enchantingBookTexture_); glBindBuffer(GL_ARRAY_BUFFER,vbo_);
+    glBufferData(GL_ARRAY_BUFFER,v.size()*sizeof(V),v.data(),GL_DYNAMIC_DRAW);
+    glDrawArrays(GL_TRIANGLES,0,static_cast<GLsizei>(v.size()));
+}
+
+void BlockEntityRenderer::renderBeaconBeam(const World& world,const RuntimeBlockEntity& e,const glm::mat4&,float partialTick){
+    if(entities_.beaconLevels(e.position)<=0) return;
+    // 1.12.2 renders the beam independently of the normal block mesh.  The
+    // texture scrolls vertically and remains translucent while extending to
+    // the build limit.
+    const float y0=static_cast<float>(e.position.y+1), y1=static_cast<float>(chunkHeight);
+    const float x0=static_cast<float>(e.position.x)+0.3F, x1=static_cast<float>(e.position.x)+0.7F;
+    const float z0=static_cast<float>(e.position.z)+0.3F, z1=static_cast<float>(e.position.z)+0.7F;
+    const float scroll=std::fmod(partialTick*0.05F,1.0F);
+    const float light=std::max(0.75F,lightAt(world,e.position));
+    std::vector<V> v;
+    pushRectQuad(v,{glm::vec3(x0,y0,z0),glm::vec3(x0,y1,z0),glm::vec3(x1,y1,z0),glm::vec3(x1,y0,z0)},0,scroll*16,16,16+scroll*16,16,16,light);
+    pushRectQuad(v,{glm::vec3(x1,y0,z1),glm::vec3(x1,y1,z1),glm::vec3(x0,y1,z1),glm::vec3(x0,y0,z1)},0,scroll*16,16,16+scroll*16,16,16,light);
+    pushRectQuad(v,{glm::vec3(x0,y0,z1),glm::vec3(x0,y1,z1),glm::vec3(x0,y1,z0),glm::vec3(x0,y0,z0)},0,scroll*16,16,16+scroll*16,16,16,light);
+    pushRectQuad(v,{glm::vec3(x1,y0,z0),glm::vec3(x1,y1,z0),glm::vec3(x1,y1,z1),glm::vec3(x1,y0,z1)},0,scroll*16,16,16+scroll*16,16,16,light);
+    glEnable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA); glDepthMask(GL_FALSE);
+    glBindTexture(GL_TEXTURE_2D,beaconBeamTexture_); glBindBuffer(GL_ARRAY_BUFFER,vbo_);
+    glBufferData(GL_ARRAY_BUFFER,v.size()*sizeof(V),v.data(),GL_DYNAMIC_DRAW);
+    glDrawArrays(GL_TRIANGLES,0,static_cast<GLsizei>(v.size()));
+    glDepthMask(GL_TRUE); glDisable(GL_BLEND);
+}

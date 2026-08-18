@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(Blockcraft VERSION 0.15.0 LANGUAGES C CXX)
+project(Blockcraft VERSION 0.17.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -266,6 +266,7 @@ set(BLOCKCRAFT_CORE_SOURCES
     src/world/Chunk.cpp
     src/world/World.cpp
     src/world/BlockEntitySystem.cpp
+    src/world/DynamicBlockSystem.cpp
     src/world/ItemEntitySystem.cpp
     src/save/Nbt.cpp
     src/save/RegionFile.cpp
@@ -375,6 +376,48 @@ if(BUILD_TESTING)
         target_compile_options(blockcraft_rendering_model_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
     endif()
     add_test(NAME blockcraft_rendering_models COMMAND blockcraft_rendering_model_tests)
+
+    add_executable(blockcraft_dynamic_world_tests
+        tests/DynamicWorldTests.cpp
+        src/blocks/BlockRegistry.cpp
+        src/world/Chunk.cpp
+        src/world/World.cpp
+        src/world/DynamicBlockSystem.cpp
+    )
+    target_include_directories(blockcraft_dynamic_world_tests PRIVATE src)
+    target_link_libraries(blockcraft_dynamic_world_tests PRIVATE glm::glm)
+    if(MSVC)
+        target_compile_options(blockcraft_dynamic_world_tests PRIVATE /W4 /permissive- /UNDEBUG)
+    else()
+        target_compile_options(blockcraft_dynamic_world_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
+    endif()
+    add_test(NAME blockcraft_dynamic_world COMMAND blockcraft_dynamic_world_tests)
+
+    add_executable(blockcraft_functional_block_entity_tests
+        tests/FunctionalBlockEntityTests.cpp
+        src/blocks/BlockRegistry.cpp
+        src/blocks/BlockShape.cpp
+        src/core/Json.cpp
+        src/items/ItemRegistry.cpp
+        src/player/Player.cpp
+        src/player/PlayerInventory.cpp
+        src/survival/MiningRules.cpp
+        src/survival/FurnaceRules.cpp
+        src/survival/FoodStats.cpp
+        src/world/Chunk.cpp
+        src/world/World.cpp
+        src/world/Raycast.cpp
+        src/world/BlockEntitySystem.cpp
+        src/save/Nbt.cpp
+    )
+    target_include_directories(blockcraft_functional_block_entity_tests PRIVATE src)
+    target_link_libraries(blockcraft_functional_block_entity_tests PRIVATE glm::glm zlibstatic)
+    if(MSVC)
+        target_compile_options(blockcraft_functional_block_entity_tests PRIVATE /W4 /permissive- /UNDEBUG)
+    else()
+        target_compile_options(blockcraft_functional_block_entity_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
+    endif()
+    add_test(NAME blockcraft_functional_block_entities COMMAND blockcraft_functional_block_entity_tests)
 endif()
 
 set_property(DIRECTORY PROPERTY VS_STARTUP_PROJECT blockcraft)

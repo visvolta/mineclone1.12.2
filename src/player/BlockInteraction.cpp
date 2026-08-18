@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <vector>
+#include <array>
 
 #include "blocks/BlockRegistry.hpp"
 #include "items/ItemRegistry.hpp"
@@ -12,6 +13,7 @@
 #include "rendering/WorldRenderer.hpp"
 #include "survival/MiningRules.hpp"
 #include "world/ItemEntitySystem.hpp"
+#include "world/DynamicBlockSystem.hpp"
 #include "world/World.hpp"
 
 namespace {
@@ -25,6 +27,9 @@ bool sameBreakingItem(const ItemStack& a,const ItemStack& b){
 
 void BlockInteraction::commitEdit(World& world,LightingEngine& lighting,WorldRenderer& renderer,const glm::ivec3& p,BlockState state){
     const BlockState old=world.getBlock(p.x,p.y,p.z); world.setBlock(p.x,p.y,p.z,state); blockEntities_.blockChanged(world,p,old,state);
+    dynamicBlocks_.neighborChanged(world,p);
+    constexpr std::array<glm::ivec3,6> around{{{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}}};
+    for (const glm::ivec3& d : around) dynamicBlocks_.neighborChanged(world,p+d);
     const auto changes=lighting.blockChangedSync(p.x,p.y,p.z); renderer.blockChangedSync(p.x,p.y,p.z,changes);
 }
 void BlockInteraction::applyPlan(World& world,LightingEngine& lighting,WorldRenderer& renderer,const PlacementPlan& plan,bool notify){
@@ -55,7 +60,12 @@ void BlockInteraction::tick(World& world,LightingEngine& lighting,WorldRenderer&
     const auto hit=raycastBlocks(world,player.eyePosition(),look,reach);
 
     if(usingBlock&&useDelay_==0&&hit){
-        if(const auto action=blockEntities_.activate(world,*hit)){pendingBlockEntityAction_=action;useDelay_=4;}
+        ItemStack specialEjected;
+        if(blockEntities_.useSpecial(world,*hit,player,specialEjected)){
+            if(!specialEjected.empty()) itemEntities_.spawn(specialEjected, glm::dvec3(hit->block) + glm::dvec3(0.5,0.8,0.5));
+            useDelay_=4;
+        }
+        else if(const auto action=blockEntities_.activate(world,*hit)){pendingBlockEntityAction_=action;useDelay_=4;}
         else if(const auto activation=placement_.activation(world,player,look,*hit)){applyPlan(world,lighting,renderer,*activation);useDelay_=4;}
         else {ItemStack& held=player.inventory().selected();const ItemStack placed=held;if(const auto plan=placement_.placement(world,player,look,*hit,held)){
             applyPlan(world,lighting,renderer,*plan);for(const auto& e:plan->changes){blockEntities_.placedFromItem(e.position,e.state,placed);const BlockId id=static_cast<BlockId>(blockId(e.state));if((id==BlockId::StandingSign||id==BlockId::WallSign)&&!pendingBlockEntityAction_)pendingBlockEntityAction_=BlockEntityAction{BlockEntityActionType::EditSign,e.position};}

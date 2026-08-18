@@ -67,9 +67,10 @@ public:
 
     [[nodiscard]] const std::filesystem::path& folder() const { return folder_; }
     [[nodiscard]] WorldConfig loadConfig(const WorldConfig& clientDefaults) const;
-    [[nodiscard]] LoadedPlayerState loadPlayer(Player& player) const;
+    [[nodiscard]] LoadedPlayerState loadPlayer(Player& player, BlockEntitySystem* blockEntities = nullptr) const;
     void loadEnvironment(Environment& environment) const;
-    void saveLevel(const WorldConfig& config, const Player& player, const Environment& environment);
+    void saveLevel(const WorldConfig& config, const Player& player, const Environment& environment,
+                   const BlockEntitySystem* blockEntities = nullptr);
 
     [[nodiscard]] std::unique_ptr<Chunk> loadChunk(int chunkX, int chunkZ) const;
     void saveChunk(const Chunk& chunk, const BlockEntitySystem& blockEntities);

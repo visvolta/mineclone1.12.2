@@ -39,6 +39,7 @@
 #include "save/WorldSave.hpp"
 #include "world/World.hpp"
 #include "world/BlockEntitySystem.hpp"
+#include "world/DynamicBlockSystem.hpp"
 #include "world/ItemEntitySystem.hpp"
 #include "worldgen/ChunkStreamer.hpp"
 #include "worldgen/WorldConfig.hpp"
@@ -220,9 +221,10 @@ int main() {
 
         World world;
         BlockEntitySystem blockEntities;
+        DynamicBlockSystem dynamicBlocks(static_cast<std::uint64_t>(config.seed));
         ItemEntitySystem itemEntities(itemRegistry);
         Player player({0.5, 80.0, 0.5});
-        LoadedPlayerState loadedPlayer = worldSave.loadPlayer(player);
+        LoadedPlayerState loadedPlayer = worldSave.loadPlayer(player, &blockEntities);
 
         frontEnd->showLoading("Loading world", "Loading biome colours", 22);
         BiomeColors::load(BLOCKCRAFT_ASSET_ROOT);
@@ -252,6 +254,10 @@ int main() {
         frontEnd->showLoading("Loading world", "Building texture atlas", 74);
         TextureAtlas atlas(blockRenderResources.atlas());
         blockEntities.scanLoadedWorld(world);
+        for (const auto& [unused, chunk] : world.chunks()) {
+            (void)unused;
+            if (chunk) dynamicBlocks.scanChunk(world, chunk->x(), chunk->z());
+        }
         frontEnd->showLoading("Loading world", "Preparing world renderer", 82);
         WorldRenderer worldRenderer(world, atlas, blockRenderResources, chunkStreamer.workers());
         Environment environment(config);
@@ -264,7 +270,7 @@ int main() {
         GameHud gameHud(window, BLOCKCRAFT_ASSET_ROOT, atlas, itemRegistry, blockRenderResources, blockEntities);
         BlockEntityRenderer blockEntityRenderer(BLOCKCRAFT_ASSET_ROOT, blockEntities);
         ItemEntityRenderer itemEntityRenderer(BLOCKCRAFT_ASSET_ROOT, itemRegistry, blockRenderResources, atlas);
-        BlockInteraction interaction(itemRegistry, blockEntities, itemEntities);
+        BlockInteraction interaction(itemRegistry, blockEntities, itemEntities, dynamicBlocks);
         camera.setPosition(player.eyePosition());
         setCursorCaptured(window, true);
         updateWindowTitle(window, player, itemRegistry, config, 0.0, world.chunkCount(),
@@ -385,6 +391,13 @@ int main() {
                                 action->type == BlockEntityActionType::OpenShulker ||
                                 action->type == BlockEntityActionType::OpenFurnace ||
                                 action->type == BlockEntityActionType::OpenCraftingTable ||
+                                action->type == BlockEntityActionType::OpenHopper ||
+                                action->type == BlockEntityActionType::OpenBrewingStand ||
+                                action->type == BlockEntityActionType::OpenEnchantingTable ||
+                                action->type == BlockEntityActionType::OpenBeacon ||
+                                action->type == BlockEntityActionType::OpenEnderChest ||
+                                action->type == BlockEntityActionType::OpenJukebox ||
+                                action->type == BlockEntityActionType::OpenFlowerPot ||
                                 action->type == BlockEntityActionType::EditSign) {
                                 gameHud.openBlockEntityScreen(*action);
                                 inventoryOpen = true;
@@ -403,6 +416,12 @@ int main() {
                         }
                     }
                     for (const glm::ivec3& changed : blockEntities.tick(world)) {
+                        const auto lightingChanges = lightingEngine.blockChangedSync(changed.x, changed.y, changed.z);
+                        worldRenderer.blockChangedSync(changed.x, changed.y, changed.z, lightingChanges);
+                        dynamicBlocks.neighborChanged(world, changed);
+                    }
+                    for (const glm::ivec3& changed : dynamicBlocks.tick(world)) {
+                        blockEntities.rescanPosition(world, changed);
                         const auto lightingChanges = lightingEngine.blockChangedSync(changed.x, changed.y, changed.z);
                         worldRenderer.blockChangedSync(changed.x, changed.y, changed.z, lightingChanges);
                     }
@@ -438,6 +457,7 @@ int main() {
                 lightingEngine.chunkLoaded(coordinate.x, coordinate.z);
                 worldRenderer.chunkLoaded(coordinate.x, coordinate.z);
                 blockEntities.scanChunk(world, coordinate.x, coordinate.z);
+                dynamicBlocks.scanChunk(world, coordinate.x, coordinate.z);
             }
             const std::vector<LightingChange> lightChanges = lightingEngine.process(
                 player.feetPosition().x, player.feetPosition().z, config.lightMainThreadBudgetMs);

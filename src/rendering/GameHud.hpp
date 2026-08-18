@@ -83,6 +83,10 @@ private:
     void renderBlockEntityScreen(const World& world, Player& player, int scaledWidth, int scaledHeight, int scaleFactor);
     void renderContainerScreen(const World& world, Player& player, int scaledWidth, int scaledHeight, int scaleFactor);
     void renderFurnaceScreen(const World& world, Player& player, int scaledWidth, int scaledHeight, int scaleFactor);
+    void renderHopperScreen(const World& world, Player& player, int scaledWidth, int scaledHeight, int scaleFactor);
+    void renderBrewingScreen(const World& world, Player& player, int scaledWidth, int scaledHeight, int scaleFactor);
+    void renderEnchantingScreen(const World& world, Player& player, int scaledWidth, int scaledHeight, int scaleFactor);
+    void renderBeaconScreen(const World& world, Player& player, int scaledWidth, int scaledHeight, int scaleFactor);
     void renderCraftingTableScreen(Player& player, int scaledWidth, int scaledHeight, int scaleFactor);
     void renderSignEditor(int scaledWidth, int scaledHeight, int scaleFactor);
     void renderPauseMenu(int scaledWidth, int scaledHeight, int scaleFactor);
@@ -114,6 +118,10 @@ private:
     GLuint generic54Texture_ = 0;
     GLuint craftingTableTexture_ = 0;
     GLuint furnaceTexture_ = 0;
+    GLuint hopperTexture_ = 0;
+    GLuint brewingTexture_ = 0;
+    GLuint enchantingTexture_ = 0;
+    GLuint beaconTexture_ = 0;
     GLuint chestItemTexture_ = 0;
     GLuint trappedChestItemTexture_ = 0;
     GLuint enderChestItemTexture_ = 0;

@@ -112,6 +112,15 @@ std::string tileEntityId(RuntimeBlockEntityType type) {
         case RuntimeBlockEntityType::Bed: return "minecraft:bed";
         case RuntimeBlockEntityType::ShulkerBox: return "minecraft:shulker_box";
         case RuntimeBlockEntityType::Furnace: return "minecraft:furnace";
+        case RuntimeBlockEntityType::Hopper: return "minecraft:hopper";
+        case RuntimeBlockEntityType::BrewingStand: return "minecraft:brewing_stand";
+        case RuntimeBlockEntityType::EnchantingTable: return "minecraft:enchanting_table";
+        case RuntimeBlockEntityType::Beacon: return "minecraft:beacon";
+        case RuntimeBlockEntityType::Jukebox: return "minecraft:jukebox";
+        case RuntimeBlockEntityType::FlowerPot: return "minecraft:flower_pot";
+        case RuntimeBlockEntityType::MobSpawner: return "minecraft:mob_spawner";
+        case RuntimeBlockEntityType::EnderChest: return "minecraft:ender_chest";
+        case RuntimeBlockEntityType::Banner: return "minecraft:banner";
     }
     return "minecraft:chest";
 }
@@ -155,7 +164,7 @@ WorldConfig WorldSave::loadConfig(const WorldConfig& defaults) const {
     return config;
 }
 
-LoadedPlayerState WorldSave::loadPlayer(Player& player) const {
+LoadedPlayerState WorldSave::loadPlayer(Player& player, BlockEntitySystem* blockEntities) const {
     LoadedPlayerState state;
     const nbt::Document document = nbt::readGzipFile(folder_ / "level.dat");
     const nbt::Compound* data = dataCompound(document);
@@ -210,6 +219,19 @@ LoadedPlayerState WorldSave::loadPlayer(Player& player) const {
             if (slot >= 0 && slot < static_cast<int>(PlayerInventory::mainSize)) player.inventory().slot(static_cast<std::size_t>(slot)) = itemStackFromTag(itemData);
             else if (slot >= 100 && slot < 104) player.inventory().armor(static_cast<std::size_t>(slot-100)) = itemStackFromTag(itemData);
         }
+    }
+    if (blockEntities != nullptr) {
+        std::array<ItemStack,27> ender{};
+        if (const nbt::Tag* enderItems = nbt::find(stored, "EnderItems");
+            enderItems != nullptr && enderItems->type == nbt::Type::List) {
+            for (const nbt::Tag& item : enderItems->list()) {
+                if (item.type != nbt::Type::Compound) continue;
+                const nbt::Compound& itemData = item.compound();
+                const int slot = static_cast<int>(nbt::integer(itemData, "Slot", -1));
+                if (slot >= 0 && slot < 27) ender[static_cast<std::size_t>(slot)] = itemStackFromTag(itemData);
+            }
+        }
+        blockEntities->setEnderChestInventory(std::move(ender));
     }
 
     player.restoreState(state.position, state.velocity, state.gameMode, state.selectedHotbar);
@@ -295,7 +317,7 @@ ItemStack WorldSave::itemStackFromTag(const nbt::Compound& data) const {
 }
 
 void WorldSave::saveLevel(const WorldConfig& config, const Player& player,
-                          const Environment& environment) {
+                          const Environment& environment, const BlockEntitySystem* blockEntities) {
     std::string levelName = folder_.filename().string();
     std::int32_t spawnX = 0;
     std::int32_t spawnY = 64;
@@ -363,6 +385,13 @@ void WorldSave::saveLevel(const WorldConfig& config, const Player& player,
     for (std::size_t index=0;index<PlayerInventory::mainSize;++index){const ItemStack& stack=player.inventory().slot(index);if(!stack.empty())inventory.push_back(itemStackTag(stack,static_cast<int>(index)));}
     for (std::size_t index=0;index<4;++index){const ItemStack& stack=player.inventory().armor(index);if(!stack.empty())inventory.push_back(itemStackTag(stack,100+static_cast<int>(index)));}
     storedPlayer["Inventory"] = nbt::Tag(nbt::Type::Compound, std::move(inventory));
+    if (blockEntities != nullptr) {
+        nbt::List enderItems;
+        const auto& ender = blockEntities->enderChestInventory();
+        for (std::size_t index=0; index<ender.size(); ++index) if (!ender[index].empty())
+            enderItems.push_back(itemStackTag(ender[index], static_cast<int>(index)));
+        storedPlayer["EnderItems"] = nbt::Tag(nbt::Type::Compound, std::move(enderItems));
+    }
     data["Player"] = nbt::Tag(std::move(storedPlayer));
 
     nbt::Document document;
@@ -477,9 +506,15 @@ nbt::Document WorldSave::chunkDocument(const Chunk& chunk,
         if (entity.type == RuntimeBlockEntityType::ShulkerBox)
             tile["Color"] = nbt::Tag(static_cast<std::int8_t>(entity.color));
         if (entity.type == RuntimeBlockEntityType::Chest || entity.type == RuntimeBlockEntityType::TrappedChest ||
-            entity.type == RuntimeBlockEntityType::ShulkerBox || entity.type == RuntimeBlockEntityType::Furnace) {
+            entity.type == RuntimeBlockEntityType::ShulkerBox || entity.type == RuntimeBlockEntityType::Furnace ||
+            entity.type == RuntimeBlockEntityType::Hopper || entity.type == RuntimeBlockEntityType::BrewingStand ||
+            entity.type == RuntimeBlockEntityType::EnchantingTable || entity.type == RuntimeBlockEntityType::Beacon ||
+            entity.type == RuntimeBlockEntityType::Jukebox || entity.type == RuntimeBlockEntityType::FlowerPot) {
             nbt::List items;
-            const int slots = entity.type == RuntimeBlockEntityType::Furnace ? 3 : 27;
+            const int slots = entity.type == RuntimeBlockEntityType::Furnace ? 3 :
+                entity.type == RuntimeBlockEntityType::Hopper ? 5 : entity.type == RuntimeBlockEntityType::BrewingStand ? 5 :
+                entity.type == RuntimeBlockEntityType::EnchantingTable ? 2 :
+                (entity.type == RuntimeBlockEntityType::Beacon || entity.type == RuntimeBlockEntityType::Jukebox || entity.type == RuntimeBlockEntityType::FlowerPot) ? 1 : 27;
             for (int slot = 0; slot < slots; ++slot) {
                 const ItemStack& stack = entity.inventory[static_cast<std::size_t>(slot)];
                 if (!stack.empty()) items.push_back(itemStackTag(stack, slot));
@@ -490,11 +525,29 @@ nbt::Document WorldSave::chunkDocument(const Chunk& chunk,
                 tile["CookTime"] = nbt::Tag(static_cast<std::int16_t>(std::clamp(entity.furnaceCookTime, 0, 32767)));
                 tile["CookTimeTotal"] = nbt::Tag(static_cast<std::int16_t>(std::clamp(entity.furnaceCookTimeTotal, 0, 32767)));
             }
+            if (entity.type == RuntimeBlockEntityType::Hopper)
+                tile["TransferCooldown"] = nbt::Tag(static_cast<std::int32_t>(entity.transferCooldown));
+            if (entity.type == RuntimeBlockEntityType::BrewingStand) {
+                tile["BrewTime"] = nbt::Tag(static_cast<std::int16_t>(std::clamp(entity.brewTime, 0, 32767)));
+                tile["Fuel"] = nbt::Tag(static_cast<std::int8_t>(std::clamp(entity.brewingFuel, 0, 127)));
+            }
+            if (entity.type == RuntimeBlockEntityType::Beacon) {
+                tile["Levels"] = nbt::Tag(static_cast<std::int32_t>(entity.beaconLevels));
+                tile["Primary"] = nbt::Tag(static_cast<std::int32_t>(entity.beaconPrimary));
+                tile["Secondary"] = nbt::Tag(static_cast<std::int32_t>(entity.beaconSecondary));
+            }
             // Stage 7 does not yet materialize vanilla loot tables. Preserve
             // LootTable/LootTableSeed from generated data until that gameplay
             // path exists instead of silently destroying the pending loot.
         }
-        tileEntities.emplace_back(std::move(tile));
+        if (entity.type == RuntimeBlockEntityType::Jukebox) tile["Record"] = nbt::Tag(static_cast<std::int32_t>(entity.recordItem));
+        if (entity.type == RuntimeBlockEntityType::FlowerPot) { tile["Item"] = nbt::Tag(static_cast<std::int32_t>(entity.flowerItem)); tile["Data"] = nbt::Tag(static_cast<std::int32_t>(entity.flowerData)); }
+        if (entity.type == RuntimeBlockEntityType::MobSpawner) {
+            tile["Delay"] = nbt::Tag(static_cast<std::int16_t>(std::clamp(entity.spawnerDelay,0,32767)));
+            tile["SpawnData"] = nbt::Tag(nbt::Compound{{"id", nbt::Tag(entity.spawnerEntityId)}});
+        }
+        if (entity.type == RuntimeBlockEntityType::Banner) tile["Base"] = nbt::Tag(static_cast<std::int32_t>(entity.color));
+                tileEntities.emplace_back(std::move(tile));
     }
 
     for (auto& [positionKey, tile] : originalTiles) {
@@ -664,7 +717,7 @@ void WorldSave::saveAll(const World& world, const BlockEntitySystem& blockEntiti
         static_cast<void>(key);
         if (chunk) saveChunk(*chunk, blockEntities);
     }
-    saveLevel(config, player, environment);
+    saveLevel(config, player, environment, &blockEntities);
 }
 
 std::vector<WorldSummary> WorldSave::listWorlds(const std::filesystem::path& savesRoot) {

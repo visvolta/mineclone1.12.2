@@ -8,6 +8,7 @@
 #include "world/Raycast.hpp"
 #include "save/Nbt.hpp"
 #include "survival/FurnaceRules.hpp"
+#include "player/Player.hpp"
 #include "world/World.hpp"
 
 namespace {
@@ -41,6 +42,76 @@ bool normalCube(BlockState state) {
     return definition.opaque && definition.fullCube;
 }
 
+
+std::string potionType(const ItemStack& stack) {
+    if (stack.itemId != 373 && stack.itemId != 438 && stack.itemId != 441) return {};
+    if (stack.nbt.empty()) return "minecraft:water";
+    try {
+        const nbt::Document doc = nbt::decode(stack.nbt);
+        if (doc.root.type == nbt::Type::Compound)
+            return nbt::string(doc.root.compound(), "Potion", "minecraft:water");
+    } catch (...) {}
+    return "minecraft:water";
+}
+
+void setPotionType(ItemStack& stack, std::string type) {
+    nbt::Compound c;
+    if (!stack.nbt.empty()) {
+        try { const nbt::Document old = nbt::decode(stack.nbt); if (old.root.type == nbt::Type::Compound) c = old.root.compound(); } catch (...) {}
+    }
+    c["Potion"] = nbt::Tag(std::move(type));
+    nbt::Document doc; doc.root = nbt::Tag(std::move(c)); stack.nbt = nbt::encode(doc);
+}
+
+bool brewOne(ItemStack& bottle, const ItemStack& ingredient) {
+    if (bottle.empty()) return false;
+    if (ingredient.itemId == 289 && bottle.itemId == 373) { bottle.itemId = 438; return true; } // gunpowder
+    if (ingredient.itemId == 437 && bottle.itemId == 438) { bottle.itemId = 441; return true; } // dragon breath
+    const std::string current = potionType(bottle); if (current.empty()) return false;
+    std::string next;
+    if (ingredient.itemId == 372 && current == "minecraft:water") next = "minecraft:awkward";
+    else if (current == "minecraft:awkward") {
+        if (ingredient.itemId == 353) next = "minecraft:swiftness";
+        else if (ingredient.itemId == 414) next = "minecraft:leaping";
+        else if (ingredient.itemId == 378) next = "minecraft:fire_resistance";
+        else if (ingredient.itemId == 382) next = "minecraft:healing";
+        else if (ingredient.itemId == 375) next = "minecraft:poison";
+        else if (ingredient.itemId == 370) next = "minecraft:regeneration";
+        else if (ingredient.itemId == 396) next = "minecraft:night_vision";
+        else if (ingredient.itemId == 349 && ingredient.damage == 3) next = "minecraft:water_breathing";
+    } else if (ingredient.itemId == 376) {
+        if (current == "minecraft:night_vision" || current == "minecraft:long_night_vision") next = "minecraft:invisibility";
+        else if (current == "minecraft:healing" || current == "minecraft:strong_healing" || current == "minecraft:poison" || current == "minecraft:long_poison" || current == "minecraft:strong_poison") next = "minecraft:harming";
+        else if (current == "minecraft:swiftness" || current == "minecraft:long_swiftness" || current == "minecraft:leaping" || current == "minecraft:long_leaping") next = "minecraft:slowness";
+    } else if (ingredient.itemId == 331) { // redstone duration extensions
+        if (current == "minecraft:swiftness") next="minecraft:long_swiftness";
+        else if (current == "minecraft:leaping") next="minecraft:long_leaping";
+        else if (current == "minecraft:fire_resistance") next="minecraft:long_fire_resistance";
+        else if (current == "minecraft:poison") next="minecraft:long_poison";
+        else if (current == "minecraft:regeneration") next="minecraft:long_regeneration";
+        else if (current == "minecraft:night_vision") next="minecraft:long_night_vision";
+        else if (current == "minecraft:water_breathing") next="minecraft:long_water_breathing";
+        else if (current == "minecraft:invisibility") next="minecraft:long_invisibility";
+        else if (current == "minecraft:slowness") next="minecraft:long_slowness";
+    } else if (ingredient.itemId == 348) { // glowstone strength upgrades
+        if (current == "minecraft:swiftness") next="minecraft:strong_swiftness";
+        else if (current == "minecraft:leaping") next="minecraft:strong_leaping";
+        else if (current == "minecraft:healing") next="minecraft:strong_healing";
+        else if (current == "minecraft:poison") next="minecraft:strong_poison";
+        else if (current == "minecraft:regeneration") next="minecraft:strong_regeneration";
+        else if (current == "minecraft:harming") next="minecraft:strong_harming";
+    }
+    if (next.empty()) return false;
+    setPotionType(bottle, std::move(next));
+    return true;
+}
+
+bool canBrew(const RuntimeBlockEntity& entity) {
+    if (entity.inventory[3].empty()) return false;
+    for (int i=0;i<3;++i) { ItemStack copy=entity.inventory[static_cast<std::size_t>(i)]; if (brewOne(copy, entity.inventory[3])) return true; }
+    return false;
+}
+
 } // namespace
 
 std::uint64_t BlockEntitySystem::key(const glm::ivec3& p) {
@@ -60,6 +131,15 @@ std::optional<RuntimeBlockEntityType> BlockEntitySystem::typeFor(BlockState stat
     if (id == BlockId::Bed) return RuntimeBlockEntityType::Bed;
     if (isShulker(id)) return RuntimeBlockEntityType::ShulkerBox;
     if (id == BlockId::Furnace || id == BlockId::LitFurnace) return RuntimeBlockEntityType::Furnace;
+    if (id == BlockId::Hopper) return RuntimeBlockEntityType::Hopper;
+    if (id == BlockId::BrewingStand) return RuntimeBlockEntityType::BrewingStand;
+    if (id == BlockId::EnchantingTable) return RuntimeBlockEntityType::EnchantingTable;
+    if (id == BlockId::Beacon) return RuntimeBlockEntityType::Beacon;
+    if (id == BlockId::Jukebox) return RuntimeBlockEntityType::Jukebox;
+    if (id == BlockId::FlowerPot) return RuntimeBlockEntityType::FlowerPot;
+    if (id == BlockId::MobSpawner) return RuntimeBlockEntityType::MobSpawner;
+    if (id == BlockId::EnderChest) return RuntimeBlockEntityType::EnderChest;
+    if (id == BlockId::StandingBanner || id == BlockId::WallBanner) return RuntimeBlockEntityType::Banner;
     return std::nullopt;
 }
 
@@ -132,6 +212,30 @@ void BlockEntitySystem::scanChunk(const World& world, int chunkX, int chunkZ) {
                 entity->furnaceCookTime = static_cast<int>(nbt::integer(c, "CookTime", 0));
                 entity->furnaceCookTimeTotal = static_cast<int>(nbt::integer(c, "CookTimeTotal", 200));
             }
+            if (entity->type == RuntimeBlockEntityType::Hopper)
+                entity->transferCooldown = static_cast<int>(nbt::integer(c, "TransferCooldown", 0));
+            if (entity->type == RuntimeBlockEntityType::BrewingStand) {
+                entity->brewTime = static_cast<int>(nbt::integer(c, "BrewTime", 0));
+                entity->brewingFuel = static_cast<int>(nbt::integer(c, "Fuel", 0));
+            }
+            if (entity->type == RuntimeBlockEntityType::Beacon) {
+                entity->beaconLevels = static_cast<int>(nbt::integer(c, "Levels", 0));
+                entity->beaconPrimary = static_cast<int>(nbt::integer(c, "Primary", 0));
+                entity->beaconSecondary = static_cast<int>(nbt::integer(c, "Secondary", 0));
+            }
+            if (entity->type == RuntimeBlockEntityType::Jukebox)
+                entity->recordItem = static_cast<int>(nbt::integer(c, "RecordItem", nbt::integer(c, "Record", 0)));
+            if (entity->type == RuntimeBlockEntityType::FlowerPot) {
+                entity->flowerItem = static_cast<int>(nbt::integer(c, "Item", 0));
+                entity->flowerData = static_cast<int>(nbt::integer(c, "Data", 0));
+            }
+            if (entity->type == RuntimeBlockEntityType::MobSpawner) {
+                entity->spawnerDelay = static_cast<int>(nbt::integer(c, "Delay", 20));
+                if (const nbt::Tag* spawnData = nbt::find(c, "SpawnData"); spawnData && spawnData->type == nbt::Type::Compound)
+                    entity->spawnerEntityId = nbt::string(spawnData->compound(), "id", "Pig");
+            }
+            if (entity->type == RuntimeBlockEntityType::Banner)
+                entity->color = static_cast<std::uint8_t>(nbt::integer(c, "Base", entity->color) & 15);
             if (const nbt::Tag* items = nbt::find(c, "Items"); items && items->type == nbt::Type::List) {
                 for (const nbt::Tag& item : items->list()) {
                     if (item.type != nbt::Type::Compound) continue;
@@ -176,12 +280,18 @@ void BlockEntitySystem::blockChanged(const World&, const glm::ivec3& position,
     ensure(position, newState);
 }
 
+void BlockEntitySystem::rescanPosition(const World& world, const glm::ivec3& position) {
+    const BlockState state = world.getBlock(position.x, position.y, position.z);
+    if (!typeFor(state)) { entities_.erase(key(position)); return; }
+    ensure(position, state);
+}
+
 void BlockEntitySystem::placedFromItem(const glm::ivec3& position, BlockState state,
                                        const ItemStack& stack) {
     ensure(position, state);
     RuntimeBlockEntity* entity = find(position);
     if (entity == nullptr) return;
-    if (entity->type == RuntimeBlockEntityType::Bed)
+    if (entity->type == RuntimeBlockEntityType::Bed || entity->type == RuntimeBlockEntityType::Banner)
         entity->color = static_cast<std::uint8_t>(stack.damage & 15U);
 }
 
@@ -237,14 +347,62 @@ std::optional<BlockEntityAction> BlockEntitySystem::activate(const World& world,
         return BlockEntityAction{BlockEntityActionType::OpenFurnace, hit.block};
     if (id == BlockId::CraftingTable)
         return BlockEntityAction{BlockEntityActionType::OpenCraftingTable, hit.block};
+    if (id == BlockId::Hopper) return BlockEntityAction{BlockEntityActionType::OpenHopper, hit.block};
+    if (id == BlockId::BrewingStand) return BlockEntityAction{BlockEntityActionType::OpenBrewingStand, hit.block};
+    if (id == BlockId::EnchantingTable) return BlockEntityAction{BlockEntityActionType::OpenEnchantingTable, hit.block};
+    if (id == BlockId::Beacon) return BlockEntityAction{BlockEntityActionType::OpenBeacon, hit.block};
+    if (id == BlockId::EnderChest) return BlockEntityAction{BlockEntityActionType::OpenEnderChest, hit.block};
+    if (id == BlockId::Jukebox) return BlockEntityAction{BlockEntityActionType::OpenJukebox, hit.block};
+    if (id == BlockId::FlowerPot) return BlockEntityAction{BlockEntityActionType::OpenFlowerPot, hit.block};
     return std::nullopt;
+}
+
+bool BlockEntitySystem::useSpecial(World&, const RaycastHit& hit, Player& player, ItemStack& ejected) {
+    RuntimeBlockEntity* entity = find(hit.block);
+    if (entity == nullptr) return false;
+    ItemStack& held = player.inventory().selected();
+    if (entity->type == RuntimeBlockEntityType::Jukebox) {
+        if (entity->recordItem != 0) {
+            ejected = ItemStack{static_cast<std::uint16_t>(entity->recordItem),1,0,{}};
+            entity->recordItem = 0;
+            entity->inventory[0].clear();
+            return true;
+        }
+        // Legacy record IDs are 2256..2267 in 1.12.2.
+        if (!held.empty() && held.itemId >= 2256 && held.itemId <= 2267) {
+            entity->recordItem = held.itemId;
+            entity->inventory[0] = held;
+            entity->inventory[0].count = 1;
+            if (player.gameMode() != GameMode::Creative) held.shrink(1);
+            return true;
+        }
+        return true;
+    }
+    if (entity->type == RuntimeBlockEntityType::FlowerPot) {
+        if (entity->flowerItem != 0) {
+            ejected = ItemStack{static_cast<std::uint16_t>(entity->flowerItem),1,static_cast<std::uint16_t>(entity->flowerData),{}};
+            entity->flowerItem = entity->flowerData = 0;
+            entity->inventory[0].clear();
+            return true;
+        }
+        const BlockId id = static_cast<BlockId>(held.itemId);
+        const bool allowed = id == BlockId::Sapling || id == BlockId::YellowFlower || id == BlockId::RedFlower ||
+            id == BlockId::BrownMushroom || id == BlockId::RedMushroom || id == BlockId::Cactus || id == BlockId::DeadBush;
+        if (allowed && !held.empty()) {
+            entity->flowerItem = held.itemId; entity->flowerData = held.damage;
+            entity->inventory[0] = held; entity->inventory[0].count = 1;
+            if (player.gameMode() != GameMode::Creative) held.shrink(1);
+        }
+        return true;
+    }
+    return false;
 }
 
 void BlockEntitySystem::beginViewing(const BlockEntityAction& action) {
     RuntimeBlockEntity* entity = find(action.position);
     if (entity == nullptr) return;
     if (entity->type == RuntimeBlockEntityType::Chest || entity->type == RuntimeBlockEntityType::TrappedChest ||
-        entity->type == RuntimeBlockEntityType::ShulkerBox)
+        entity->type == RuntimeBlockEntityType::ShulkerBox || entity->type == RuntimeBlockEntityType::EnderChest)
         ++entity->viewers;
 }
 
@@ -252,7 +410,7 @@ void BlockEntitySystem::endViewing(const BlockEntityAction& action) {
     RuntimeBlockEntity* entity = find(action.position);
     if (entity == nullptr) return;
     if (entity->type == RuntimeBlockEntityType::Chest || entity->type == RuntimeBlockEntityType::TrappedChest ||
-        entity->type == RuntimeBlockEntityType::ShulkerBox)
+        entity->type == RuntimeBlockEntityType::ShulkerBox || entity->type == RuntimeBlockEntityType::EnderChest)
         entity->viewers = std::max(0, entity->viewers - 1);
 }
 
@@ -262,10 +420,17 @@ std::vector<glm::ivec3> BlockEntitySystem::tick(World& world) {
         (void)unused;
         entity.previousAnimation = entity.animation;
         if (entity.type == RuntimeBlockEntityType::Chest || entity.type == RuntimeBlockEntityType::TrappedChest ||
-            entity.type == RuntimeBlockEntityType::ShulkerBox) {
+            entity.type == RuntimeBlockEntityType::ShulkerBox || entity.type == RuntimeBlockEntityType::EnderChest) {
             if (entity.viewers > 0 && entity.animation < 1.0F) entity.animation += 0.1F;
             else if (entity.viewers == 0 && entity.animation > 0.0F) entity.animation -= 0.1F;
             entity.animation = std::clamp(entity.animation, 0.0F, 1.0F);
+            continue;
+        }
+        if (entity.type == RuntimeBlockEntityType::Hopper) { tickHopper(world, entity); continue; }
+        if (entity.type == RuntimeBlockEntityType::BrewingStand) { tickBrewing(entity); continue; }
+        if (entity.type == RuntimeBlockEntityType::Beacon) { tickBeacon(world, entity); continue; }
+        if (entity.type == RuntimeBlockEntityType::MobSpawner) {
+            if (entity.spawnerDelay > 0) --entity.spawnerDelay; else entity.spawnerDelay = 200 + static_cast<int>((key(entity.position) + static_cast<std::uint64_t>(entity.position.y)) % 600U);
             continue;
         }
         if (entity.type != RuntimeBlockEntityType::Furnace) continue;
@@ -323,6 +488,13 @@ int BlockEntitySystem::containerSlotCount(const World& world, const glm::ivec3& 
     const RuntimeBlockEntity* entity = find(position);
     if (entity == nullptr) return 0;
     if (entity->type == RuntimeBlockEntityType::Furnace) return 3;
+    if (entity->type == RuntimeBlockEntityType::Hopper) return 5;
+    if (entity->type == RuntimeBlockEntityType::BrewingStand) return 5;
+    if (entity->type == RuntimeBlockEntityType::EnchantingTable) return 2;
+    if (entity->type == RuntimeBlockEntityType::Beacon) return 1;
+    if (entity->type == RuntimeBlockEntityType::Jukebox) return 1;
+    if (entity->type == RuntimeBlockEntityType::FlowerPot) return 1;
+    if (entity->type == RuntimeBlockEntityType::EnderChest) return 27;
     if (entity->type == RuntimeBlockEntityType::ShulkerBox) return 27;
     if (entity->type == RuntimeBlockEntityType::Chest || entity->type == RuntimeBlockEntityType::TrappedChest)
         return pairedChest(world, position) ? 54 : 27;
@@ -335,6 +507,17 @@ ItemStack& BlockEntitySystem::containerSlot(const World& world, const glm::ivec3
     if (index < 0) throw std::out_of_range("Negative container slot");
     if (clicked->type == RuntimeBlockEntityType::Furnace) {
         if (index >= 3) throw std::out_of_range("Container slot outside furnace");
+        return clicked->inventory[static_cast<std::size_t>(index)];
+    }
+    if (clicked->type == RuntimeBlockEntityType::EnderChest) {
+        if (index >= 27) throw std::out_of_range("Container slot outside ender chest");
+        return enderChestInventory_[static_cast<std::size_t>(index)];
+    }
+    if (clicked->type == RuntimeBlockEntityType::Hopper || clicked->type == RuntimeBlockEntityType::BrewingStand ||
+        clicked->type == RuntimeBlockEntityType::EnchantingTable || clicked->type == RuntimeBlockEntityType::Beacon ||
+        clicked->type == RuntimeBlockEntityType::Jukebox || clicked->type == RuntimeBlockEntityType::FlowerPot) {
+        const int limit = clicked->type == RuntimeBlockEntityType::Hopper ? 5 : clicked->type == RuntimeBlockEntityType::BrewingStand ? 5 : clicked->type == RuntimeBlockEntityType::EnchantingTable ? 2 : 1;
+        if (index >= limit) throw std::out_of_range("Container slot outside block entity");
         return clicked->inventory[static_cast<std::size_t>(index)];
     }
     if (clicked->type == RuntimeBlockEntityType::ShulkerBox) {
@@ -368,6 +551,13 @@ std::string BlockEntitySystem::containerTitle(const World& world, const glm::ive
     const RuntimeBlockEntity* entity = find(position);
     if (entity == nullptr) return "Container";
     if (entity->type == RuntimeBlockEntityType::Furnace) return "Furnace";
+    if (entity->type == RuntimeBlockEntityType::Hopper) return "Item Hopper";
+    if (entity->type == RuntimeBlockEntityType::BrewingStand) return "Brewing Stand";
+    if (entity->type == RuntimeBlockEntityType::EnchantingTable) return "Enchant";
+    if (entity->type == RuntimeBlockEntityType::Beacon) return "Beacon";
+    if (entity->type == RuntimeBlockEntityType::Jukebox) return "Jukebox";
+    if (entity->type == RuntimeBlockEntityType::FlowerPot) return "Flower Pot";
+    if (entity->type == RuntimeBlockEntityType::EnderChest) return "Ender Chest";
     if (entity->type == RuntimeBlockEntityType::ShulkerBox) return "Shulker Box";
     if (entity->type == RuntimeBlockEntityType::TrappedChest)
         return pairedChest(world, position) ? "Large Trapped Chest" : "Trapped Chest";
@@ -407,4 +597,75 @@ float BlockEntitySystem::furnaceBurnProgress(const glm::ivec3& position) const {
 float BlockEntitySystem::takeFurnaceExperience(const glm::ivec3& position) {
     RuntimeBlockEntity* e=find(position); if(!e||e->type!=RuntimeBlockEntityType::Furnace)return 0.0F;
     const float xp=e->furnaceStoredXp; e->furnaceStoredXp=0.0F; return xp;
+}
+
+
+bool BlockEntitySystem::moveOneItem(World&, RuntimeBlockEntity& source, RuntimeBlockEntity& destination) {
+    const int sourceSlots = source.type == RuntimeBlockEntityType::Hopper ? 5 : 27;
+    const int destinationSlots = destination.type == RuntimeBlockEntityType::Hopper ? 5 :
+        destination.type == RuntimeBlockEntityType::Furnace ? 3 : 27;
+    for (int s = 0; s < sourceSlots; ++s) {
+        ItemStack& from = source.inventory[static_cast<std::size_t>(s)];
+        if (from.empty()) continue;
+        for (int d = 0; d < destinationSlots; ++d) {
+            ItemStack& to = destination.inventory[static_cast<std::size_t>(d)];
+            if (to.empty()) { to = from; to.count = 1; from.shrink(1); return true; }
+            if (to.sameItem(from) && to.count < 64) { ++to.count; from.shrink(1); return true; }
+        }
+    }
+    return false;
+}
+
+void BlockEntitySystem::tickHopper(World& world, RuntimeBlockEntity& entity) {
+    if (entity.transferCooldown > 0) { --entity.transferCooldown; return; }
+    bool moved = false;
+    // Pull from an inventory directly above first, then push into the facing/down inventory.
+    if (RuntimeBlockEntity* above = find(entity.position + glm::ivec3(0,1,0)); above != nullptr)
+        moved = moveOneItem(world, *above, entity);
+    glm::ivec3 target = entity.position + facingOffset(blockMetadata(entity.state));
+    if (!moved) {
+        if (RuntimeBlockEntity* destination = find(target); destination != nullptr)
+            moved = moveOneItem(world, entity, *destination);
+    }
+    if (moved) entity.transferCooldown = 8;
+}
+
+void BlockEntitySystem::tickBrewing(RuntimeBlockEntity& entity) {
+    ItemStack& ingredient = entity.inventory[3];
+    ItemStack& fuel = entity.inventory[4];
+    if (entity.brewingFuel <= 0 && fuel.itemId == 377 && !fuel.empty()) {
+        fuel.shrink(1); entity.brewingFuel = 20;
+    }
+    const bool valid = entity.brewingFuel > 0 && canBrew(entity);
+    if (!valid) { entity.brewTime = 0; return; }
+    if (entity.brewTime <= 0) { entity.brewTime = 400; return; }
+    if (--entity.brewTime > 0) return;
+    bool changed = false;
+    for (int i=0;i<3;++i) changed = brewOne(entity.inventory[static_cast<std::size_t>(i)], ingredient) || changed;
+    if (changed) { ingredient.shrink(1); --entity.brewingFuel; }
+}
+
+void BlockEntitySystem::tickBeacon(const World& world, RuntimeBlockEntity& entity) {
+    int levels = 0;
+    for (int layer = 1; layer <= 4; ++layer) {
+        bool full = true;
+        for (int x = -layer; x <= layer && full; ++x) for (int z = -layer; z <= layer; ++z) {
+            const BlockId id = static_cast<BlockId>(blockId(world.getBlock(entity.position.x+x, entity.position.y-layer, entity.position.z+z)));
+            if (id != BlockId::IronBlock && id != BlockId::GoldBlock && id != BlockId::DiamondBlock && id != BlockId::EmeraldBlock) { full = false; break; }
+        }
+        if (!full) break;
+        levels = layer;
+    }
+    entity.beaconLevels = levels;
+}
+
+float BlockEntitySystem::brewingProgress(const glm::ivec3& position) const {
+    const RuntimeBlockEntity* e = find(position); if (!e || e->type != RuntimeBlockEntityType::BrewingStand || e->brewTime <= 0) return 0.0F;
+    return std::clamp(1.0F - static_cast<float>(e->brewTime) / 400.0F, 0.0F, 1.0F);
+}
+int BlockEntitySystem::brewingFuel(const glm::ivec3& position) const {
+    const RuntimeBlockEntity* e = find(position); return e && e->type == RuntimeBlockEntityType::BrewingStand ? e->brewingFuel : 0;
+}
+int BlockEntitySystem::beaconLevels(const glm::ivec3& position) const {
+    const RuntimeBlockEntity* e = find(position); return e && e->type == RuntimeBlockEntityType::Beacon ? e->beaconLevels : 0;
 }
